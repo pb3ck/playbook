@@ -1280,6 +1280,7 @@ function CommandBlock({
       {(snippet.label || ran !== undefined) && (
         <div className="flex items-center justify-between gap-2 border-b border-ink-5 bg-ink-2/40 px-3 py-1">
           <RanCheckbox ran={ran} label={snippet.label} onToggle={onToggleRan} />
+          {snippet.validated && <ValidatedBadge validated={snippet.validated} />}
         </div>
       )}
       <div
@@ -1371,6 +1372,46 @@ function RanCheckbox({
         {label ?? 'mark as run'}
       </span>
     </button>
+  );
+}
+
+/** Small "✓ validated YYYY-MM-DD" chip rendered next to the
+ *  RanCheckbox when a command\'s schema carries the `validated`
+ *  block (see CommandSnippet in lib/methodology.ts). Surfaces
+ *  human-verified provenance to the user — distinguishes "this
+ *  has been run on a real target by a maintainer" from
+ *  "AI-drafted or legacy, unmarked." Hover shows the date + any
+ *  caveat notes; the chip itself is decorative-only (no
+ *  interaction). */
+function ValidatedBadge({
+  validated,
+}: {
+  validated: NonNullable<CommandSnippet['validated']>;
+}) {
+  /* Staleness: 180 days = roughly two release cycles for most
+     security tools. Past that, surface a softer treatment so the
+     user knows to spot-check. */
+  const ageDays = Math.floor(
+    (Date.now() - new Date(validated.on).getTime()) / 86_400_000,
+  );
+  const stale = ageDays > 180;
+  const title = `validated ${validated.on}${
+    validated.notes ? ` — ${validated.notes}` : ''
+  }${stale ? ` (${ageDays} days ago — re-check)` : ''}`;
+  return (
+    <span
+      title={title}
+      aria-label={title}
+      className={cn(
+        'inline-flex shrink-0 items-center gap-1 rounded border px-1 font-mono text-[9px] uppercase tracking-wider',
+        stale
+          ? 'border-bone-4/50 text-bone-4'
+          : 'border-bone-1/40 text-bone-2',
+      )}
+    >
+      <span aria-hidden>✓</span>
+      <span>{stale ? 'val · stale' : 'val'}</span>
+    </span>
   );
 }
 

@@ -84,6 +84,28 @@ export type CommandSnippet = {
    *  X, here's the detection") and by future filters that let
    *  consumers search by technique. */
   mitreTechniques?: string[];
+  /** Human-validated provenance. Set when a maintainer has run the
+   *  command against a real target (or a trusted lab) and confirmed
+   *  the syntax + flags work on currently-supported versions of the
+   *  underlying tool. Absence does NOT mean "broken" — most
+   *  legacy commands are unmarked because they predate this field —
+   *  but presence is a positive trust signal that surfaces in the
+   *  UI as a small ✓ chip and in the coverage report as a
+   *  validated-percentage column.
+   *
+   *  AI-drafted commands (`scripts/ai-draft.ts`) are explicitly
+   *  prompted NOT to set this field; only the human review step
+   *  does. The roadmap M2 accuracy bar requires this field on
+   *  every command before "out of alpha". */
+  validated?: {
+    /** YYYY-MM-DD when the command was last verified to work.
+     *  Commands validated >180 days ago should be re-checked
+     *  (the coverage report flags them as stale). */
+    on: string;
+    /** Optional caveat — prerequisites that might trip the user,
+     *  versions where the syntax changed, expected output shape. */
+    notes?: string;
+  };
 };
 
 /** An inline branching prompt — "if {if} → jump to {goto}". The user

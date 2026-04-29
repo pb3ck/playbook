@@ -198,10 +198,20 @@ function renderStep(args: {
       );
       const cmdId = commandItemId(args.phaseSlug, args.stepIndex, originalIndex);
       const ran = args.progress.has(cmdId);
+      /* Provenance annotations: "✓ ran" reflects the user\'s
+         per-command tick; "validated YYYY-MM-DD" reflects the
+         maintainer\'s human-validated provenance from the catalog
+         schema. Both surface inline so the cheatsheet user can
+         tell apart "I ran this" from "this command is known to
+         work on currently-supported versions." */
+      const annotations: string[] = [];
+      if (ran) annotations.push('**✓ ran**');
+      if (c.validated) annotations.push(`*validated ${c.validated.on}*`);
+      const annotationLine = annotations.join(' · ');
       if (c.label) {
-        out.push(ran ? `*${c.label}* — **✓ ran**` : `*${c.label}*`);
-      } else if (ran) {
-        out.push(`**✓ ran**`);
+        out.push(annotationLine ? `*${c.label}* — ${annotationLine}` : `*${c.label}*`);
+      } else if (annotationLine) {
+        out.push(annotationLine);
       }
       out.push('```sh');
       out.push(rendered);

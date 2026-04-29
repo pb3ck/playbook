@@ -34,8 +34,8 @@ import Anthropic from '@anthropic-ai/sdk';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { PHASES } from '../lib/methodology.ts';
-import { TECH_TAG_GROUPS, type TechTag } from '../lib/tech-tags.ts';
+import { PHASES } from '../lib/methodology';
+import { TECH_TAG_GROUPS, type TechTag } from '../lib/tech-tags';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..');
@@ -267,7 +267,9 @@ drafts:
 
 6. **No destructive defaults.** This will be run by people on real targets. Default to passive / read-only / rate-limited variants. Loud variants get \`appliesTo: ["lab"]\`.
 
-7. **Real commands, real flags.** No "imagine you would..." pseudo-code. If a tool doesn't have the flag you want, don't invent it.`;
+7. **Real commands, real flags.** No "imagine you would..." pseudo-code. If a tool doesn't have the flag you want, don't invent it.
+
+8. **Never set the \`validated\` field.** The CommandSnippet schema in lib/methodology.ts has an optional \`validated: { on, notes? }\` block. That field marks human-verified commands and is set ONLY by the maintainer after they run the command against a real target. Your output is by definition unvalidated; including the field would be a lie. Stick to the YAML structure shown above (no \`validated\`).`;
 }
 
 /* =================================================== Provider */
