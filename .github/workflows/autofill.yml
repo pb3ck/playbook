@@ -1,0 +1,163 @@
+# Continuous-fill — runs weekly to grow the curated catalog one
+# (tag, phase) at a time. Picks the most-needed gap, drafts via
+# Anthropic, applies via ai:apply, opens a PR with the diff.
+#
+# Trust boundary preserved: maintainer reviews + merges the PR.
+# Automation pushes everything else: no scripts to run by hand,
+# no TypeScript to type, no typecheck to run. The maintainer's
+# day flips from "edit the catalog" to "review weekly PRs."
+#
+# Setup required (one-time, by repo admin):
+#   - Add ANTHROPIC_API_KEY to repo secrets (the same key the
+#     local ai:draft / ai:apply scripts use)
+#   - Make sure GITHUB_TOKEN has permission to open PRs (default
+#     for repos with default workflow permissions)
+#   - If your account isn't enrolled in Anthropic security
+#     research, swap the model in scripts/ai-draft.ts /
+#     scripts/ai-apply.ts to a permissive provider — Ollama
+#     can't run inside the Action because GH-hosted runners
+#     don't have GPU. Cloudflare Workers AI (custom-host) is
+#     a viable cheap alternative.
+#
+# Manual dispatch (workflow_dispatch) lets you target a specific
+# (tag, phase) instead of letting the picker choose — useful for
+# "go fill tomcat exploit" demands.
+
+name: autofill
+
+on:
+  schedule:
+    # Mondays at 12:00 UTC. One PR/week is plenty of catalog
+    # growth without overwhelming the maintainer's review queue.
+    - cron: '0 12 * * 1'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Override tag pick (e.g. tomcat). Leave blank for auto.'
+        required: false
+      phase:
+        description: 'Override phase pick (recon|vuln|exploit|post-ex|defense). Leave blank for auto.'
+        required: false
+      count:
+        description: 'Candidates to draft (default 4)'
+        required: false
+        default: '4'
+
+# Cancel a previous run if this one supersedes it (e.g. manual
+# dispatch while last week's scheduled run is still in flight).
+concurrency:
+  group: autofill
+  cancel-in-progress: false
+
+jobs:
+  fill:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write       # for the bot branch + commit
+      pull-requests: write  # to open the PR
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: install
+        run: npm ci
+
+      - name: run autofill
+        id: autofill
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          # Build CLI args from optional manual-dispatch inputs.
+          ARGS=()
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            ARGS+=(--tag "${{ github.event.inputs.tag }}")
+          fi
+          if [ -n "${{ github.event.inputs.phase }}" ]; then
+            ARGS+=(--phase "${{ github.event.inputs.phase }}")
+          fi
+          if [ -n "${{ github.event.inputs.count }}" ]; then
+            ARGS+=(--count "${{ github.event.inputs.count }}")
+          fi
+          # Capture the script's JSON output (last line) to a step
+          # output. `--silent` suppresses npm's own banner so the
+          # last line of stdout is reliably our JSON.
+          set -o pipefail
+          OUT=$(npm run --silent autofill:next -- "${ARGS[@]}" | tail -n 1)
+          echo "result<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$OUT" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+          echo "Autofill result:"
+          echo "$OUT" | head -c 2000
+
+      - name: parse autofill result
+        id: parse
+        run: |
+          # Use jq to pull out fields for the PR body / branch
+          # naming. `noop=true` short-circuits the rest of the
+          # workflow — no PR if there's nothing to do.
+          R='${{ steps.autofill.outputs.result }}'
+          NOOP=$(echo "$R" | jq -r '.noop // false')
+          OK=$(echo "$R" | jq -r '.ok // false')
+          TAG=$(echo "$R" | jq -r '.tag // ""')
+          PHASE=$(echo "$R" | jq -r '.phase // ""')
+          ADDED=$(echo "$R" | jq -r '.added // 0')
+          REASON=$(echo "$R" | jq -r '.reason // ""')
+          echo "noop=$NOOP" >> "$GITHUB_OUTPUT"
+          echo "ok=$OK" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "phase=$PHASE" >> "$GITHUB_OUTPUT"
+          echo "added=$ADDED" >> "$GITHUB_OUTPUT"
+          echo "reason=$REASON" >> "$GITHUB_OUTPUT"
+
+      - name: re-run coverage report
+        if: steps.parse.outputs.noop != 'true' && steps.parse.outputs.ok == 'true'
+        run: npm run coverage
+
+      - name: open PR
+        if: steps.parse.outputs.noop != 'true' && steps.parse.outputs.ok == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: autofill/${{ steps.parse.outputs.tag }}-${{ steps.parse.outputs.phase }}
+          delete-branch: true
+          commit-message: |
+            autofill: ${{ steps.parse.outputs.tag }} / ${{ steps.parse.outputs.phase }} (+${{ steps.parse.outputs.added }} cmds)
+
+            Picked by scripts/autofill-next.ts:
+            ${{ steps.parse.outputs.reason }}
+          title: 'autofill: ${{ steps.parse.outputs.tag }} / ${{ steps.parse.outputs.phase }} (+${{ steps.parse.outputs.added }} cmds)'
+          body: |
+            Continuous-fill ran and generated the diff in this PR.
+
+            **Pick:** `${{ steps.parse.outputs.tag }}` / `${{ steps.parse.outputs.phase }}` (+${{ steps.parse.outputs.added }} commands)
+
+            **Reasoning:** ${{ steps.parse.outputs.reason }}
+
+            ### Pipeline
+
+            1. `scripts/autofill-next.ts` analyzed coverage, picked the most-needed gap
+            2. `scripts/ai-draft.ts` drafted candidates via Anthropic
+            3. `scripts/ai-apply.ts` placed them into `lib/methodology.ts` (typecheck-verified)
+            4. `scripts/coverage-report.ts` regenerated `coverage/<today>.md`
+
+            ### Review checklist
+
+            - [ ] Read `git diff lib/methodology.ts` — placements look right
+            - [ ] Sources resolve (`npm run check:sources` if unsure)
+            - [ ] MITRE mappings are sharp (see `data/mitre-techniques.json` for the local vocabulary)
+            - [ ] No duplicates of existing curated commands
+            - [ ] If something looks off, comment / close — drafts are gitignored so closing is non-destructive
+
+            Generated content lands without `validated:` (per design — that field is set only after a maintainer runs the command on a lab box).
+
+            ---
+            🤖 Auto-generated by `.github/workflows/autofill.yml`. Trigger manually via Actions tab → autofill → Run workflow.
+
+      - name: noop summary
+        if: steps.parse.outputs.noop == 'true'
+        run: |
+          echo "::notice::Nothing to autofill — every tag passes the readiness bar. 🎉"

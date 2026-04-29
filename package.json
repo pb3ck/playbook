@@ -18,6 +18,7 @@
     "coverage": "tsx scripts/coverage-report.ts",
     "ai:draft": "tsx scripts/ai-draft.ts",
     "ai:apply": "tsx scripts/ai-apply.ts",
+    "autofill:next": "tsx scripts/autofill-next.ts",
     "validate": "tsx scripts/validate.ts",
     "sync:mitre": "tsx scripts/sync-mitre.ts",
     "check:sources": "tsx scripts/check-sources.ts"

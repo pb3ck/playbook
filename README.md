@@ -165,7 +165,30 @@ npm run check:sources
 # → HEAD-checks every tool URL in the catalog
 # → reports broken (4xx/5xx) + redirected entries
 # → exit code 1 on broken, 0 otherwise (CI-friendly)
+
+# 7. Continuous-fill — pick the next gap, draft, apply (one shot).
+npm run autofill:next
+# → analyzes coverage, picks the most-needed (tag, phase) gap
+# → runs ai:draft, then ai:apply
+# → emits a JSON summary (machine-readable)
+# Mostly invoked by the .github/workflows/autofill.yml workflow
+# (weekly cron + manual dispatch); occasionally useful locally.
 ```
+
+### Continuous-fill workflow
+
+`.github/workflows/autofill.yml` runs `autofill:next` weekly and
+opens a PR with the diff. The maintainer reviews + merges the PR
+— reviewing at PR-speed instead of edit-speed.
+
+Setup (one-time, by repo admin):
+1. Add `ANTHROPIC_API_KEY` to repo secrets
+2. (Optional) trigger manually via Actions tab → autofill → Run
+   workflow, with optional `tag` / `phase` / `count` overrides
+
+The workflow respects the same trust boundary as local
+`ai:apply`: human reviews the diff before merge. Difference: the
+human reviews on github.com instead of in their editor.
 
 The `scripts/drafts/` directory is gitignored so unvalidated
 output never leaks into history. `ai:apply` is the preferred path
