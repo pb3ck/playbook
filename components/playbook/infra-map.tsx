@@ -28,6 +28,61 @@ function findCveIn(meta: string | undefined): string | null {
   return m ? m[0].toUpperCase() : null;
 }
 
+/* =================================================== Service-color palette
+   Eight CSS-token-backed colors, one per "service ancestor branch."
+   See globals.css `--color-svc-*` for the actual hues. The palette
+   is rotated through deterministically by hashing the service id,
+   so re-loads always produce the same colors and the user can rely
+   on muscle memory ("kerberos was cyan last time"). */
+const SERVICE_COLORS = [
+  'var(--color-svc-1)',
+  'var(--color-svc-2)',
+  'var(--color-svc-3)',
+  'var(--color-svc-4)',
+  'var(--color-svc-5)',
+  'var(--color-svc-6)',
+  'var(--color-svc-7)',
+  'var(--color-svc-8)',
+] as const;
+
+/** Stable hash → palette index. Same input always maps to the
+ *  same color across renders + sessions. Cheap djb2-ish loop, no
+ *  crypto needed (this is purely visual). */
+function colorForServiceId(id: string): string {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) {
+    h = ((h << 5) - h + id.charCodeAt(i)) | 0;
+  }
+  return SERVICE_COLORS[Math.abs(h) % SERVICE_COLORS.length];
+}
+
+/** Walk parent pointers up from `node` until we hit a node of kind
+ *  'service' (or run out of parents). Used by the edge / node
+ *  colorers — every node in a service\'s sub-tree shares the
+ *  service\'s color, so the user can trace a whole engagement
+ *  branch by following one hue from finding all the way up to
+ *  the discoverer tool. */
+function serviceAncestor(node: InfraNode, all: InfraNode[]): InfraNode | null {
+  let cur: InfraNode | null = node;
+  while (cur) {
+    if (cur.kind === 'service') return cur;
+    if (!cur.parentId) return null;
+    cur = all.find((n) => n.id === cur!.parentId) ?? null;
+  }
+  return null;
+}
+
+/** Edge stroke color for a given child node. If the child has a
+ *  service ancestor (i.e. it sits inside a service\'s sub-tree),
+ *  the edge gets that service\'s palette color. Otherwise (host
+ *  → recon-tool, host → context, host → credential) it stays the
+ *  neutral ink-5 the canvas used before — those "trunk" edges
+ *  aren\'t branches and shouldn\'t pretend to be. */
+function edgeStrokeFor(child: InfraNode, all: InfraNode[]): string {
+  const svc = serviceAncestor(child, all);
+  return svc ? colorForServiceId(svc.id) : 'var(--color-ink-5)';
+}
+
 /**
  * Read-only attack-graph canvas. Nodes are *derived* from the live
  * session state (target, OS, engagement, selected tags, versions,
@@ -680,6 +735,7 @@ function Canvas({
                 key={`edge-${n.id}`}
                 fromRect={parentRect}
                 toRect={childRect}
+                stroke={edgeStrokeFor(n, nodes)}
               />
             );
           })}
@@ -719,9 +775,15 @@ function Canvas({
 function Edge({
   fromRect,
   toRect,
+  stroke,
 }: {
   fromRect: { x: number; y: number; w: number; h: number };
   toRect: { x: number; y: number; w: number; h: number };
+  /** Edge color — defaults to neutral ink-5 for "trunk" edges,
+   *  overridden by the service-ancestor palette color for any
+   *  edge inside a service\'s sub-tree (so branches off a shared
+   *  hub like Nmap each get their own distinct hue). */
+  stroke?: string;
 }) {
   /* Compute endpoints at each rectangle\'s perimeter on the line
      connecting the two centres, so the edge stops at the visible
@@ -740,13 +802,19 @@ function Edge({
      parent → child arc when the layout is mostly horizontal. */
   const cx1 = start.x + (end.x - start.x) * 0.5;
   const cx2 = start.x + (end.x - start.x) * 0.5;
+  /* Solid stroke for service-tinted edges (so the color reads
+     clearly), dashed for the neutral trunk lines (matches the
+     "this is structural, not branch-flow" reading of the
+     original design). */
+  const isStructural = !stroke || stroke === 'var(--color-ink-5)';
   return (
     <path
       d={`M ${start.x} ${start.y} C ${cx1} ${start.y}, ${cx2} ${end.y}, ${end.x} ${end.y}`}
       fill="none"
-      stroke="var(--color-ink-5)"
-      strokeWidth="1"
-      strokeDasharray="3 3"
+      stroke={stroke ?? 'var(--color-ink-5)'}
+      strokeWidth={isStructural ? '1' : '1.25'}
+      strokeDasharray={isStructural ? '3 3' : undefined}
+      strokeOpacity={isStructural ? 1 : 0.85}
     />
   );
 }
@@ -832,6 +900,16 @@ function CanvasNode({
      keeps everything in lockstep. */
   const transition = { duration: 0 };
 
+  /* Service nodes carry the palette color of their own
+     branch as a thin top-border accent — implicit legend so
+     the user can see "this kerberos service owns the cyan
+     edges fanning out from it" without a separate color key
+     elsewhere on the canvas. Other node kinds skip the accent
+     (their edge color comes from their service ancestor, which
+     is already implicitly attributed to the service node). */
+  const serviceAccent =
+    node.kind === 'service' ? colorForServiceId(node.id) : null;
+
   return (
     <motion.div
       role="button"
@@ -839,12 +917,17 @@ function CanvasNode({
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
-      onPointerCancel={onPointerUp}
       style={{
         position: 'absolute',
         left: node.x + offsetX,
         top: node.y + offsetY,
         touchAction: 'none',
+        ...(serviceAccent
+          ? {
+              borderTopColor: serviceAccent,
+              borderTopWidth: '2px',
+            }
+          : {}),
       }}
       animate={{ x: delta.x, y: delta.y }}
       transition={transition}
@@ -1056,6 +1139,40 @@ function bbox(nodes: InfraNode[]): {
 
 /* =================================================== SVG export */
 
+/* Hex mirror of SERVICE_COLORS — the SVG export inlines hex
+   literals (no access to the document\'s CSS custom properties),
+   so we keep a parallel array. Indices must match SERVICE_COLORS
+   so a service hashes to the same color in both the live canvas
+   and the downloaded artifact. */
+const SERVICE_COLORS_HEX = [
+  '#7eb8c9', // cyan
+  '#8fb89a', // mint
+  '#c08a99', // rose
+  '#a597c0', // lavender
+  '#c4a18a', // peach
+  '#c4a76a', // gold
+  '#9eb087', // sage
+  '#8aa3b8', // slate
+] as const;
+
+function colorForServiceIdHex(id: string): string {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) {
+    h = ((h << 5) - h + id.charCodeAt(i)) | 0;
+  }
+  return SERVICE_COLORS_HEX[Math.abs(h) % SERVICE_COLORS_HEX.length];
+}
+
+function edgeStrokeForHex(child: InfraNode, all: InfraNode[]): {
+  color: string;
+  isStructural: boolean;
+} {
+  const svc = serviceAncestor(child, all);
+  return svc
+    ? { color: colorForServiceIdHex(svc.id), isStructural: false }
+    : { color: '#3a3a3a', isStructural: true };
+}
+
 function buildExportSvg(nodes: InfraNode[]): string {
   const { width, height, minX, minY } = bbox(nodes);
   const offsetX = Math.max(0, -minX) + 60;
@@ -1092,8 +1209,15 @@ function buildExportSvg(nodes: InfraNode[]): string {
     });
     const cx1 = start.x + (end.x - start.x) * 0.5;
     const cx2 = start.x + (end.x - start.x) * 0.5;
+    /* Per-edge color via service-ancestor lookup — exported SVG
+       preserves the on-screen branch coloring so downloaded
+       reports tell the same engagement story. */
+    const { color, isStructural } = edgeStrokeForHex(n, nodes);
+    const dash = isStructural ? ' stroke-dasharray="3 3"' : '';
+    const sw = isStructural ? '1' : '1.25';
+    const op = isStructural ? '' : ' stroke-opacity="0.85"';
     edges.push(
-      `<path d="M ${start.x} ${start.y} C ${cx1} ${start.y}, ${cx2} ${end.y}, ${end.x} ${end.y}" fill="none" stroke="#3a3a3a" stroke-width="1" stroke-dasharray="3 3" />`,
+      `<path d="M ${start.x} ${start.y} C ${cx1} ${start.y}, ${cx2} ${end.y}, ${end.x} ${end.y}" fill="none" stroke="${color}" stroke-width="${sw}"${dash}${op} />`,
     );
   }
 
@@ -1117,9 +1241,19 @@ function buildExportSvg(nodes: InfraNode[]): string {
       const techs = n.techniques.slice(0, 4).map(escapeXml).join('  ');
       const techMore =
         n.techniques.length > 4 ? `  +${n.techniques.length - 4}` : '';
+      const nodeH = metaText ? 56 : 38;
+      /* Service nodes get a 2px-tall colored bar across the top
+         edge as their palette accent — mirrors the borderTop in
+         the live canvas, makes the legend implicit in the export
+         without needing a separate color key. */
+      const accent =
+        n.kind === 'service'
+          ? `<rect x="0" y="0" width="160" height="2" fill="${colorForServiceIdHex(n.id)}" />`
+          : '';
       return `
         <g transform="translate(${x} ${y})">
-          <rect width="160" height="${metaText ? 56 : 38}" rx="6" ry="6" fill="${fill}" stroke="${stroke}"${strokeDash} />
+          <rect width="160" height="${nodeH}" rx="6" ry="6" fill="${fill}" stroke="${stroke}"${strokeDash} />
+          ${accent}
           <text x="8" y="14" font-family="monospace" font-size="8" fill="#a3a3a3" letter-spacing="1">${kindLabel(n.kind).toUpperCase()}</text>
           <text x="40" y="14" font-family="monospace" font-size="11" fill="#f5f5f5">${truncateForSvg(labelText, 18)}</text>
           ${metaText ? `<text x="8" y="32" font-family="monospace" font-size="10" fill="#a3a3a3">${truncateForSvg(metaText, 22)}</text>` : ''}
@@ -1143,7 +1277,7 @@ function buildExportSvg(nodes: InfraNode[]): string {
   <rect width="100%" height="100%" fill="url(#g)" />
   ${edges.join('\n  ')}
   ${nodeRects}
-  <text x="12" y="${H - 12}" font-family="monospace" font-size="9" fill="#737373" letter-spacing="1">ANGST.ROCKS · INFRASTRUCTURE MAP · ${new Date().toISOString().slice(0, 16).replace('T', ' ')}</text>
+  <text x="12" y="${H - 12}" font-family="monospace" font-size="9" fill="#737373" letter-spacing="1">PLAYBOOK · INFRASTRUCTURE MAP · ${new Date().toISOString().slice(0, 16).replace('T', ' ')}</text>
 </svg>`;
 }
 

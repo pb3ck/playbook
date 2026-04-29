@@ -21,6 +21,30 @@
      band as `--color-accent` so the two read as peers. */
   --color-warn:    #ffb224;
 
+  /* Service-ancestry palette for the infra map. Eight muted hues
+     wide enough to host any reasonable engagement (most run with
+     ≤6 selected tags). Each service node hashes deterministically
+     to one of these, and every edge in that service\'s sub-tree
+     (recon-tool → service, service → finding-tool → finding) gets
+     stroked with the same color — making branches off a shared
+     hub like Nmap immediately distinguishable instead of a
+     tangle of overlapping ink-5 lines.
+
+     Saturation is deliberately low so the colors live alongside
+     the bone scale without screaming; brightness is mid-range so
+     they read on pure black without going washed-out. Don\'t use
+     these for anything other than service-ancestry coloring —
+     other accent needs should reach for --color-accent (red) or
+     --color-warn (amber). */
+  --color-svc-1:   #7eb8c9;  /* cyan */
+  --color-svc-2:   #8fb89a;  /* mint */
+  --color-svc-3:   #c08a99;  /* rose */
+  --color-svc-4:   #a597c0;  /* lavender */
+  --color-svc-5:   #c4a18a;  /* peach */
+  --color-svc-6:   #c4a76a;  /* gold */
+  --color-svc-7:   #9eb087;  /* sage */
+  --color-svc-8:   #8aa3b8;  /* slate */
+
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
