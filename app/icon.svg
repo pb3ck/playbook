@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!--
+    playbook favicon — pure-black square with a stylized prompt
+    glyph (>_), matching the terminal-y "this is a copy-and-run
+    walkthrough" feel of the app. Mono-only to render crisply at
+    16px. Next.js picks this up automatically as /favicon via the
+    app/icon.svg convention.
+  -->
+  <rect width="32" height="32" fill="#000000"/>
+  <path
+    d="M 8 11 L 14 16 L 8 21"
+    fill="none"
+    stroke="#f5f5f5"
+    stroke-width="2.4"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <line
+    x1="16" y1="22"
+    x2="24" y2="22"
+    stroke="#f5f5f5"
+    stroke-width="2.4"
+    stroke-linecap="round"
+  />
+</svg>

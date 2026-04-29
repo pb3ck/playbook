@@ -1,0 +1,50 @@
+# Catches the common regressions before they hit main:
+#   - typecheck       — strict TS errors fail fast
+#   - build           — Next.js static export must succeed
+#   - coverage        — runs the report so a catalog change that
+#                       breaks the script (bad import, schema drift)
+#                       fails CI rather than silently lying later
+#
+# We don't gate on coverage *content* (would block any commit that
+# adds a placeholder tag), only on the script not crashing — that's
+# the "the wheels still turn" signal, not a quality gate.
+#
+# No artifact upload yet; if catalog drift becomes a frequent issue
+# we can add a comment-on-PR step that posts the coverage delta.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: install
+        run: npm ci
+
+      - name: typecheck
+        run: npm run typecheck
+
+      - name: build (static export)
+        run: npm run build
+
+      - name: coverage report (smoke)
+        # --no-write so CI doesn't try to commit / produce diff noise;
+        # we just want to confirm the script runs end-to-end against
+        # whatever's in lib/methodology.ts at this commit.
+        run: npm run coverage -- --no-write
