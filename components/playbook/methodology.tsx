@@ -25,6 +25,7 @@ import {
   type SearchableItem,
 } from '@/lib/playbook/search';
 import { AiAssist } from './ai-assist';
+import { CoveragePulse } from './coverage-pulse';
 import { DefenseThreadback } from './defense-threadback';
 import { PlaybookMap } from './map';
 import { cn } from '@/lib/cn';
@@ -98,6 +99,12 @@ export function PlaybookFocusView({ state }: { state: PlaybookState }) {
         onChange={setTopSection}
         searchActive={state.query.trim().length > 0}
       />
+      {/* Coverage pulse — single-line "what does the catalog have
+          for your stack right now?" summary. Compact by default,
+          click to expand into per-phase rows with gap callouts that
+          scroll to AI Assist. Replaces the alpha disclaimer\'s
+          vague "coverage is uneven" with specific contextual info. */}
+      <CoveragePulse state={state} />
       <AnimatePresence mode="wait" initial={false}>
         {topSection === 'playbook' && (
           <motion.div

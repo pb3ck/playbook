@@ -17,6 +17,7 @@
     "typecheck": "tsc --noEmit",
     "coverage": "tsx scripts/coverage-report.ts",
     "ai:draft": "tsx scripts/ai-draft.ts",
+    "ai:apply": "tsx scripts/ai-apply.ts",
     "validate": "tsx scripts/validate.ts",
     "sync:mitre": "tsx scripts/sync-mitre.ts"
   },
