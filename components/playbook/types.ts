@@ -158,12 +158,12 @@ export type PlaybookState = {
   recents: string[];
   commitOpen: (url: string) => void;
 
-  /** BYOK provider profiles — user-configured connections to CVE /
-   *  threat-intel APIs (NVD, OSV, EPSS, VulnCheck, custom internal
-   *  endpoints). Powers the per-finding CVE enrichment popover and
-   *  any future "fetch live data" surfaces. Keys live ONLY in
-   *  this device\'s localStorage; the static-export server sees
-   *  nothing. See `lib/playbook/byok.ts` for the full shape. */
+  /** BYOK provider profiles — user-configured connections to
+   *  external APIs. Two families share this storage:
+   *    - CVE enrichment: NVD / EPSS / OSV / VulnCheck / custom
+   *    - AI generation: Anthropic / OpenAI / Ollama / openai-compatible
+   *  Keys live ONLY in this device\'s localStorage; the static-
+   *  export server sees nothing. See `lib/playbook/byok.ts`. */
   byokProfiles: import('@/lib/playbook/byok').ByokProfile[];
   /** Replace the entire profile list. Settings UI uses functional
    *  form to add / edit / delete without races against rapid
@@ -175,4 +175,24 @@ export type PlaybookState = {
           prev: import('@/lib/playbook/byok').ByokProfile[],
         ) => import('@/lib/playbook/byok').ByokProfile[]),
   ) => void;
+
+  /** On-demand AI generations created by the user via the
+   *  "describe a situation" surface. Stored newest-first, capped
+   *  at MAX_GENERATIONS. Each entry includes the prompt, the
+   *  generated commands, and provenance metadata. Generated
+   *  content is NEVER auto-merged into lib/methodology.ts — it
+   *  lives only here, marked clearly in the UI as "AI-generated,
+   *  not catalog material." */
+  aiGenerations: import('@/lib/playbook/ai-generate').GeneratedAssistance[];
+  /** Insert a fresh generation at the front of the list (and trim
+   *  the tail to MAX_GENERATIONS). Replaces any earlier generation
+   *  with the same id. */
+  addAiGeneration: (
+    g: import('@/lib/playbook/ai-generate').GeneratedAssistance,
+  ) => void;
+  /** Drop a single generation by id (the small × on each card). */
+  removeAiGeneration: (id: string) => void;
+  /** Wipe all generations (the welcome modal\'s reset-all-data
+   *  link consults this). */
+  clearAiGenerations: () => void;
 };

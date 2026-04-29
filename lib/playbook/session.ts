@@ -70,6 +70,16 @@ export type SessionSnapshot = {
   visited_steps: string[];
   /** User-built infrastructure attack graph. See infra.ts. */
   infra_map: InfraMap;
+  /** On-demand AI generations made during this session, newest
+   *  first. Optional in older snapshots (added 2026-04-29);
+   *  parser tolerates absence. Sharing a snapshot with
+   *  generations carries the AI output to the receiver — this
+   *  is by design (the receiver gets the same engagement state,
+   *  including any "we generated this for tomcat" content). The
+   *  snapshot does NOT include BYOK profile keys, so generations
+   *  travel with their text but the receiver still needs their
+   *  own AI key to make new ones. */
+  ai_generations?: import('./ai-generate').GeneratedAssistance[];
 };
 
 /** Build a snapshot from the live PlaybookState. Does NOT touch the
@@ -85,6 +95,10 @@ export function buildSessionSnapshot(args: {
   progress: Set<string>;
   visitedSteps: Set<string>;
   infraMap: InfraMap;
+  /** Optional — AI-generated assistance entries to bundle into
+   *  the snapshot. Caller passes `state.aiGenerations`; if empty
+   *  / undefined the field is omitted from the output JSON. */
+  aiGenerations?: import('./ai-generate').GeneratedAssistance[];
 }): SessionSnapshot {
   const commands: string[] = [];
   const prechecks: string[] = [];
@@ -122,6 +136,12 @@ export function buildSessionSnapshot(args: {
     progress: { steps: [], commands: commands.sort(), prechecks: prechecks.sort() },
     visited_steps: [...args.visitedSteps].sort(),
     infra_map: args.infraMap,
+    /* Omit when empty/undefined to keep older snapshots
+       byte-identical and minimize payload for sessions that
+       didn\'t use AI generation. */
+    ...(args.aiGenerations && args.aiGenerations.length > 0
+      ? { ai_generations: args.aiGenerations }
+      : {}),
   };
 }
 

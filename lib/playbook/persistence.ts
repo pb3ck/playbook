@@ -14,6 +14,10 @@ import {
   type InfraMap,
 } from './infra';
 import { normalizeByokProfiles, type ByokProfile } from './byok';
+import {
+  normalizeGenerations,
+  type GeneratedAssistance,
+} from './ai-generate';
 
 /* Storage keys — the source of truth for what we persist. Centralized so
    bumping a schema version (e.g. invalidating old entries) is a single
@@ -65,11 +69,21 @@ export const STORAGE_KEYS = {
    *  this" is the honest signal. */
   visitedSteps: 'playbook-visited-steps',
   /** BYOK profiles — array of { id, name, kind, apiKey?, baseUrl?,
-   *  headerName?, enabled }. Powers the CVE enrichment popover.
-   *  See `lib/playbook/byok.ts` for the full shape + provider
-   *  semantics. Keys live ONLY here on the user\'s device — the
+   *  headerName?, model?, enabled }. Two families share storage:
+   *  CVE-enrichment kinds (NVD/EPSS/OSV/VulnCheck/custom) feed
+   *  the BYOK CVE popover; AI-generation kinds (anthropic/openai/
+   *  ollama/openai-compatible) feed the on-demand AI assistance
+   *  flow. Keys live ONLY here on the user\'s device — the
    *  static-export server has no backend to forward them to. */
   byokProfiles: 'playbook-byok-profiles',
+  /** Recent on-demand AI generations (capped at MAX_GENERATIONS,
+   *  newest first). Each entry contains the user\'s prompt, the
+   *  resulting commands + cautions, and provenance metadata
+   *  (provider, model, timestamps, token counts). Persisted so a
+   *  generation made earlier in the session is still there after
+   *  reload — explicit "regenerate" affordance replaces; never
+   *  auto-mutates. */
+  aiGenerations: 'playbook-ai-generations',
 } as const;
 
 /** Cap on how many recent tool URLs we remember in the palette. */
@@ -190,6 +204,17 @@ export function loadInfraMap(): InfraMap {
 export function loadByokProfiles(): ByokProfile[] {
   return safeRead<ByokProfile[]>(STORAGE_KEYS.byokProfiles, [], (v) =>
     normalizeByokProfiles(v),
+  );
+}
+
+/** Returns the persisted on-demand AI generations or empty array.
+ *  Capped + tolerant via normalizeGenerations — partial older
+ *  shapes drop, total list trimmed to MAX_GENERATIONS. */
+export function loadAiGenerations(): GeneratedAssistance[] {
+  return safeRead<GeneratedAssistance[]>(
+    STORAGE_KEYS.aiGenerations,
+    [],
+    (v) => normalizeGenerations(v),
   );
 }
 

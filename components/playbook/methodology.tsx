@@ -24,6 +24,7 @@ import {
   searchPlaybook,
   type SearchableItem,
 } from '@/lib/playbook/search';
+import { AiAssist } from './ai-assist';
 import { DefenseThreadback } from './defense-threadback';
 import { PlaybookMap } from './map';
 import { cn } from '@/lib/cn';
@@ -140,6 +141,18 @@ export function PlaybookFocusView({ state }: { state: PlaybookState }) {
           </motion.div>
         )}
       </AnimatePresence>
+      {/* AI Assist surface — sits beneath the curated focus view
+          regardless of active section (Playbook / Search / Map),
+          so the user can describe a situation the curated catalog
+          doesn\'t cover and get on-demand AI guidance. Generated
+          content is per-session, clearly labeled, never auto-merged
+          into lib/methodology.ts. Hidden inside this <section> so
+          it inherits the same surface-gradient as the focus view
+          but is visually distinguished by its own warning-amber
+          treatment inside ai-assist.tsx. */}
+      <div className="border-t border-ink-5/60 px-5 pt-1 pb-5 sm:px-8 sm:pt-2 sm:pb-7">
+        <AiAssist state={state} />
+      </div>
     </motion.section>
   );
 }

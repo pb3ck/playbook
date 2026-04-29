@@ -29,8 +29,31 @@
 /* =================================================== Types */
 
 /** Provider kind. The orchestrator dispatches to the matching
- *  adapter based on this discriminator. */
-export type ByokKind = 'nvd-2.0' | 'epss' | 'osv' | 'vulncheck' | 'custom';
+ *  adapter based on this discriminator. Two families share the
+ *  same profile shape:
+ *
+ *    CVE-enrichment kinds — feed the BYOK CVE popover:
+ *      'nvd-2.0' | 'epss' | 'osv' | 'vulncheck' | 'custom'
+ *
+ *    AI-generation kinds — feed the on-demand assistance flow
+ *    (lib/playbook/ai-generate.ts), surfaced as the "describe
+ *    your situation" input. Recommended path is Ollama (local;
+ *    no data leaves the device, no content-policy gates).
+ *      'anthropic' | 'openai' | 'ollama' | 'openai-compatible'
+ *
+ *  Storing both families in one profile array keeps the settings
+ *  drawer + persistence simple; helpers like `profileCategory`
+ *  group them visually + functionally. */
+export type ByokKind =
+  | 'nvd-2.0'
+  | 'epss'
+  | 'osv'
+  | 'vulncheck'
+  | 'custom'
+  | 'anthropic'
+  | 'openai'
+  | 'ollama'
+  | 'openai-compatible';
 
 /** A single user-configured BYOK profile. Persisted as part of an
  *  array under `STORAGE_KEYS.byokProfiles`. */
@@ -38,20 +61,32 @@ export type ByokProfile = {
   /** Random UUID, generated at create time. Stable across renames. */
   id: string;
   /** Human label shown in the settings UI ("Production NVD",
-   *  "Internal CVEDB"). Free-form. */
+   *  "Internal CVEDB", "Local Ollama"). Free-form. */
   name: string;
   kind: ByokKind;
   /** API key / token. Optional for kinds that don\'t require auth
-   *  (epss, osv) — kept in the type so the form is uniform. */
+   *  (epss, osv, ollama) — kept in the type so the form is uniform. */
   apiKey?: string;
-  /** Custom-only: full base URL with `{id}` placeholder for the
-   *  CVE id (e.g. `https://internal.example.com/cve/{id}`). */
+  /** For kinds that take a custom endpoint:
+   *    - 'custom' (CVE): URL template with `{id}` placeholder
+   *    - 'ollama': base URL of the local Ollama server (default
+   *      `http://localhost:11434`)
+   *    - 'openai-compatible': any OpenAI chat-API-shaped endpoint
+   *      (vLLM, LiteLLM, LM Studio, OpenRouter, etc.) */
   baseUrl?: string;
-  /** Custom-only: HTTP header name for the auth value. Default
-   *  `Authorization`. */
+  /** Custom-CVE-only: HTTP header name for the auth value. Default
+   *  `Authorization`. Ignored for AI kinds. */
   headerName?: string;
-  /** User toggle — false hides the profile from `enrichCve`
-   *  fan-out without deleting it. */
+  /** AI-kinds-only: model id to request. Examples:
+   *    - anthropic: 'claude-sonnet-4-5'
+   *    - openai: 'gpt-4o'
+   *    - ollama: 'llama3.1:70b' / 'whiterabbitneo' / etc.
+   *    - openai-compatible: whatever the proxy exposes
+   *  CVE kinds ignore this. */
+  model?: string;
+  /** User toggle — false hides the profile from orchestrator
+   *  fan-out (CVE: enrichCve; AI: generateAssistance) without
+   *  deleting it. */
   enabled: boolean;
 };
 
@@ -89,7 +124,30 @@ const VALID_KINDS: ReadonlySet<ByokKind> = new Set([
   'osv',
   'vulncheck',
   'custom',
+  'anthropic',
+  'openai',
+  'ollama',
+  'openai-compatible',
 ]);
+
+/** Two profile families share storage but split in the UI + at
+ *  orchestrator dispatch. */
+export type ByokCategory = 'cve' | 'ai';
+
+const AI_KINDS: ReadonlySet<ByokKind> = new Set<ByokKind>([
+  'anthropic',
+  'openai',
+  'ollama',
+  'openai-compatible',
+]);
+
+export function profileCategory(profile: ByokProfile): ByokCategory {
+  return AI_KINDS.has(profile.kind) ? 'ai' : 'cve';
+}
+
+export function isAiKind(kind: ByokKind): boolean {
+  return AI_KINDS.has(kind);
+}
 
 /** Salvage a parsed JSON blob into a list of profiles, dropping
  *  anything that doesn\'t look like a profile. Tolerant by design
@@ -110,6 +168,7 @@ export function normalizeByokProfiles(raw: unknown): ByokProfile[] {
       apiKey: typeof p.apiKey === 'string' ? p.apiKey : undefined,
       baseUrl: typeof p.baseUrl === 'string' ? p.baseUrl : undefined,
       headerName: typeof p.headerName === 'string' ? p.headerName : undefined,
+      model: typeof p.model === 'string' ? p.model : undefined,
       enabled: p.enabled !== false /* default true */,
     });
   }
@@ -138,6 +197,25 @@ export function newProfileSeed(kind: ByokKind): ByokProfile {
       baseUrl: 'https://example.com/cve/{id}',
       headerName: 'Authorization',
     },
+    /* AI provider seeds. Ollama defaults to local — the
+       recommended path for the on-demand AI feature since data
+       + inference stay on the user\'s device. WhiteRabbitNeo is
+       a Llama-based open-weight model fine-tuned for offensive
+       security; users on Ollama can `ollama pull whiterabbitneo`
+       and they\'re ready. The other AI kinds default to current
+       flagship-tier model ids; users override per-profile. */
+    anthropic: { name: 'Anthropic', model: 'claude-sonnet-4-5' },
+    openai: { name: 'OpenAI', model: 'gpt-4o' },
+    ollama: {
+      name: 'Ollama (local)',
+      baseUrl: 'http://localhost:11434',
+      model: 'whiterabbitneo',
+    },
+    'openai-compatible': {
+      name: 'OpenAI-compatible',
+      baseUrl: 'https://example.com/v1',
+      model: 'model-id',
+    },
   };
   return {
     id: generateProfileId(),
@@ -161,21 +239,65 @@ export function kindLabel(kind: ByokKind): string {
       return 'VulnCheck';
     case 'custom':
       return 'Custom';
+    case 'anthropic':
+      return 'Anthropic';
+    case 'openai':
+      return 'OpenAI';
+    case 'ollama':
+      return 'Ollama (local)';
+    case 'openai-compatible':
+      return 'OpenAI-compatible';
   }
 }
 
 /** Whether this provider kind needs an API key to function. UI
- *  uses this to hide the key field for kinds that don\'t. */
+ *  uses this to hide the key field for kinds that don\'t. Ollama
+ *  is local — no key. NVD takes an optional key (raises rate
+ *  limit). The rest require one. */
 export function kindNeedsKey(kind: ByokKind): boolean {
-  return kind === 'nvd-2.0' /* optional but useful for rate-limit */ ||
-    kind === 'vulncheck' || kind === 'custom';
+  return (
+    kind === 'nvd-2.0' /* optional but useful for rate-limit */ ||
+    kind === 'vulncheck' ||
+    kind === 'custom' ||
+    kind === 'anthropic' ||
+    kind === 'openai' ||
+    kind === 'openai-compatible'
+  );
 }
 
 /** Whether the kind\'s endpoint supports browser CORS. The settings
  *  UI surfaces a hint when CORS is known to be blocked so users
- *  understand why a request might fail. */
+ *  understand why a request might fail. Ollama is local-CORS
+ *  friendly with `OLLAMA_ORIGINS=*` set; document this in the
+ *  drawer. */
 export function kindSupportsBrowserCors(kind: ByokKind): boolean {
-  return kind === 'nvd-2.0' || kind === 'epss' || kind === 'osv';
+  return (
+    kind === 'nvd-2.0' ||
+    kind === 'epss' ||
+    kind === 'osv' ||
+    kind === 'anthropic' ||
+    kind === 'openai' ||
+    kind === 'ollama'
+  );
+}
+
+/** Content-policy posture for the kind, surfaced in the settings
+ *  drawer for AI providers so users aren\'t surprised when a
+ *  pentest prompt gets refused. Free-form strings — UI just
+ *  renders them. */
+export function kindPolicyNote(kind: ByokKind): string | null {
+  switch (kind) {
+    case 'anthropic':
+      return 'Pentest content requires Anthropic security research enrollment; otherwise prompts get refused.';
+    case 'openai':
+      return 'Content policy refuses many offensive-security prompts; results vary by phrasing + model.';
+    case 'ollama':
+      return 'No vendor policy — you control the model. WhiteRabbitNeo is a Llama fine-tune built for this use case.';
+    case 'openai-compatible':
+      return 'Policy depends on the backing provider/model — refer to whoever runs the endpoint.';
+    default:
+      return null;
+  }
 }
 
 /* =================================================== Fetch helper */
@@ -539,7 +661,13 @@ export async function enrichCve(
   profiles: ByokProfile[],
   cveId: string,
 ): Promise<{ profile: ByokProfile; result: FetchResult<CveDetails> }[]> {
-  const enabled = profiles.filter((p) => p.enabled);
+  /* Only fan out to CVE-category profiles. AI profiles share the
+     same storage but power a different feature (on-demand
+     generation); skipping them here keeps the popover free of
+     spurious errors when the user has both kinds enabled. */
+  const enabled = profiles.filter(
+    (p) => p.enabled && profileCategory(p) === 'cve',
+  );
   return Promise.all(
     enabled.map(async (profile) => ({
       profile,
@@ -548,7 +676,10 @@ export async function enrichCve(
   );
 }
 
-/** Dispatch a single (profile, cve) pair to the right adapter. */
+/** Dispatch a single (profile, cve) pair to the right adapter.
+ *  AI-category profiles aren\'t CVE-callable; if one slips through
+ *  the caller filtering we return a uniform error result rather
+ *  than throwing, so the popover renders a recognizable message. */
 function dispatch(
   profile: ByokProfile,
   cveId: string,
@@ -564,6 +695,14 @@ function dispatch(
       return fetchFromVulncheck(profile, cveId);
     case 'custom':
       return fetchFromCustom(profile, cveId);
+    case 'anthropic':
+    case 'openai':
+    case 'ollama':
+    case 'openai-compatible':
+      return Promise.resolve({
+        ok: false,
+        error: `${kindLabel(profile.kind)} is an AI provider; not callable for CVE enrichment`,
+      });
   }
 }
 

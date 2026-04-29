@@ -6,6 +6,7 @@ import { ENGAGEMENTS, type Engagement } from '@/lib/engagements';
 import { TARGET_OSES, type TargetOSChoice } from '@/lib/target-os';
 import { TECH_TAG_GROUPS, type TechTag } from '@/lib/tech-tags';
 import {
+  loadAiGenerations,
   loadByokProfiles,
   loadEngagement,
   loadPhase,
@@ -23,6 +24,10 @@ import {
   STORAGE_KEYS,
 } from '@/lib/playbook/persistence';
 import type { ByokProfile } from '@/lib/playbook/byok';
+import {
+  trimGenerations,
+  type GeneratedAssistance,
+} from '@/lib/playbook/ai-generate';
 import { readStateFromURL, writeStateToURL } from '@/lib/playbook/url-state';
 import { EMPTY_INFRA_MAP, type InfraMap } from '@/lib/playbook/infra';
 import {
@@ -79,6 +84,7 @@ export function usePlaybookState(): PlaybookState {
   >({});
   const [infraMap, setInfraMapState] = useState<InfraMap>(EMPTY_INFRA_MAP);
   const [byokProfiles, setByokProfilesState] = useState<ByokProfile[]>([]);
+  const [aiGenerations, setAiGenerationsState] = useState<GeneratedAssistance[]>([]);
 
   const [focusedStepIdx, setFocusedStepIdxState] = useState<number | null>(
     null,
@@ -116,6 +122,7 @@ export function usePlaybookState(): PlaybookState {
     setScratchValuesState(loadScratchValues());
     setInfraMapState(loadInfraMap());
     setByokProfilesState(loadByokProfiles());
+    setAiGenerationsState(loadAiGenerations());
 
     /* URL params take precedence over localStorage — a shared link
        applies its phase + query, not your previous one. */
@@ -247,6 +254,7 @@ export function usePlaybookState(): PlaybookState {
     setScratchValuesState({});
     setInfraMapState(EMPTY_INFRA_MAP);
     setByokProfilesState([]);
+    setAiGenerationsState([]);
     setRecents([]);
     setEngagementState(null);
     setTargetOSState(null);
@@ -270,6 +278,12 @@ export function usePlaybookState(): PlaybookState {
     setInfraMapState(snapshot.infra_map);
     setProgress(progressFromSnapshot(snapshot));
     setVisitedSteps(new Set(snapshot.visited_steps));
+    /* AI generations may be absent on older snapshots — coerce
+       missing to empty so an old snapshot doesn\'t leave stale
+       generations from the previous session in place. */
+    setAiGenerationsState(
+      snapshot.ai_generations ? trimGenerations(snapshot.ai_generations) : [],
+    );
     /* Target is keyed under the snapshot\'s engagement, mirroring
        the per-engagement target map. If no engagement is set we
        drop the target rather than orphan it. */
@@ -291,6 +305,10 @@ export function usePlaybookState(): PlaybookState {
     safeWrite(STORAGE_KEYS.scratchValues, snapshot.scratch_values);
     safeWrite(STORAGE_KEYS.infraMap, snapshot.infra_map);
     safeWrite(STORAGE_KEYS.visitedSteps, snapshot.visited_steps);
+    safeWrite(
+      STORAGE_KEYS.aiGenerations,
+      snapshot.ai_generations ? trimGenerations(snapshot.ai_generations) : [],
+    );
     safeWrite(
       STORAGE_KEYS.progress,
       Array.from(progressFromSnapshot(snapshot)),
@@ -406,6 +424,34 @@ export function usePlaybookState(): PlaybookState {
     [],
   );
 
+  /** AI-generation mutators — three operations the UI needs:
+   *  add-or-replace (regenerate replaces by id), remove-by-id,
+   *  clear-all. Newest-first ordering + MAX_GENERATIONS cap is
+   *  enforced inside add via trimGenerations. */
+  const addAiGeneration = useCallback((g: GeneratedAssistance) => {
+    setAiGenerationsState((prev) => {
+      /* Replace a previous entry with the same id (regenerate
+         flow), otherwise prepend. */
+      const without = prev.filter((p) => p.id !== g.id);
+      const next = trimGenerations([g, ...without]);
+      safeWrite(STORAGE_KEYS.aiGenerations, next);
+      return next;
+    });
+  }, []);
+
+  const removeAiGeneration = useCallback((id: string) => {
+    setAiGenerationsState((prev) => {
+      const next = prev.filter((p) => p.id !== id);
+      safeWrite(STORAGE_KEYS.aiGenerations, next);
+      return next;
+    });
+  }, []);
+
+  const clearAiGenerations = useCallback(() => {
+    setAiGenerationsState([]);
+    safeWrite(STORAGE_KEYS.aiGenerations, []);
+  }, []);
+
   return {
     mounted,
     engagement,
@@ -447,5 +493,9 @@ export function usePlaybookState(): PlaybookState {
     commitOpen,
     byokProfiles,
     setByokProfiles,
+    aiGenerations,
+    addAiGeneration,
+    removeAiGeneration,
+    clearAiGenerations,
   };
 }

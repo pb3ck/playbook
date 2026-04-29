@@ -8,10 +8,13 @@ import {
   type ByokProfile,
   type CveDetails,
   type FetchResult,
+  isAiKind,
   kindLabel,
   kindNeedsKey,
+  kindPolicyNote,
   kindSupportsBrowserCors,
   newProfileSeed,
+  profileCategory,
   testProfile,
 } from '@/lib/playbook/byok';
 
@@ -94,39 +97,87 @@ export function ByokSettings({
           </p>
         </section>
 
-        {/* Profile list */}
-        <div className="mt-5">
-          {profiles.length === 0 ? (
-            <EmptyHint />
-          ) : (
-            <ul className="flex flex-col gap-3">
-              {profiles.map((p) => (
-                <li key={p.id}>
-                  <ProfileRow
-                    profile={p}
-                    onChange={(next) =>
-                      setProfiles((prev) =>
-                        prev.map((x) => (x.id === p.id ? next : x)),
-                      )
-                    }
-                    onDelete={() =>
-                      setProfiles((prev) => prev.filter((x) => x.id !== p.id))
-                    }
-                  />
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+        {/* Profile list — split into CVE-enrichment + AI-generation
+            sections so the user can find each at a glance. Each
+            section has its own "+ add" row matching the kinds that
+            belong to it. */}
+        {profiles.length === 0 && <EmptyHint />}
 
-        {/* Add new */}
-        <AddRow
-          onAdd={(kind) =>
-            setProfiles((prev) => [...prev, newProfileSeed(kind)])
-          }
+        <ProfileSection
+          heading="CVE enrichment"
+          subhead="Power the per-finding lookup popover in the Map. Recommended starter: NVD 2.0 — no key required."
+          profiles={profiles.filter((p) => profileCategory(p) === 'cve')}
+          setProfiles={setProfiles}
+          kinds={['nvd-2.0', 'epss', 'osv', 'vulncheck', 'custom']}
+        />
+
+        <ProfileSection
+          heading="On-demand AI assistance"
+          subhead='Power the "describe a situation" generator. Recommended starter: Ollama running locally (no data leaves your device). Anthropic / OpenAI / OpenAI-compatible work too — see policy notes below.'
+          profiles={profiles.filter((p) => profileCategory(p) === 'ai')}
+          setProfiles={setProfiles}
+          kinds={['ollama', 'anthropic', 'openai', 'openai-compatible']}
         />
       </div>
     </Overlay>
+  );
+}
+
+/** A header + filtered profile list + add-row triple, used twice
+ *  in the drawer (once for CVE kinds, once for AI kinds). Keeps
+ *  the two families visually + functionally separated without
+ *  duplicating glue. */
+function ProfileSection({
+  heading,
+  subhead,
+  profiles,
+  setProfiles,
+  kinds,
+}: {
+  heading: string;
+  subhead: string;
+  profiles: ByokProfile[];
+  setProfiles: (
+    next: ByokProfile[] | ((prev: ByokProfile[]) => ByokProfile[]),
+  ) => void;
+  kinds: ByokKind[];
+}) {
+  return (
+    <section className="mt-6">
+      <div className="mb-3 border-b border-ink-5/60 pb-2">
+        <h3 className="font-mono text-[10px] uppercase tracking-[0.22em] text-bone-1">
+          {heading}
+        </h3>
+        <p className="mt-1 text-[11.5px] leading-relaxed text-bone-3">
+          {subhead}
+        </p>
+      </div>
+      {profiles.length > 0 && (
+        <ul className="flex flex-col gap-3">
+          {profiles.map((p) => (
+            <li key={p.id}>
+              <ProfileRow
+                profile={p}
+                onChange={(next) =>
+                  setProfiles((prev) =>
+                    prev.map((x) => (x.id === p.id ? next : x)),
+                  )
+                }
+                onDelete={() =>
+                  setProfiles((prev) => prev.filter((x) => x.id !== p.id))
+                }
+              />
+            </li>
+          ))}
+        </ul>
+      )}
+      <AddRow
+        kinds={kinds}
+        onAdd={(kind) =>
+          setProfiles((prev) => [...prev, newProfileSeed(kind)])
+        }
+      />
+    </section>
   );
 }
 
@@ -230,23 +281,40 @@ function ProfileRow({
         )}
       </div>
 
-      {/* Custom-only baseUrl field */}
-      {profile.kind === 'custom' && (
+      {/* Per-kind URL fields. Each AI / custom kind that needs a
+          base URL surfaces here with a kind-appropriate label. */}
+      {(profile.kind === 'custom' ||
+        profile.kind === 'ollama' ||
+        profile.kind === 'openai-compatible') && (
         <div className="mt-2">
           <label className="mb-0.5 block font-mono text-[10px] uppercase tracking-wider text-bone-3">
-            base URL (use {'{id}'} for the CVE id)
+            {profile.kind === 'custom' && (
+              <>base URL (use {'{id}'} for the CVE id)</>
+            )}
+            {profile.kind === 'ollama' && <>ollama base URL</>}
+            {profile.kind === 'openai-compatible' && (
+              <>base URL (chat-completions endpoint or its parent)</>
+            )}
           </label>
           <input
             type="text"
             value={profile.baseUrl ?? ''}
             onChange={(e) => update({ baseUrl: e.target.value })}
-            placeholder="https://internal.example.com/cve/{id}"
+            placeholder={
+              profile.kind === 'custom'
+                ? 'https://internal.example.com/cve/{id}'
+                : profile.kind === 'ollama'
+                  ? 'http://localhost:11434'
+                  : 'https://example.com/v1'
+            }
             className="w-full rounded-md border border-ink-5 bg-ink-0 inset-input px-2 py-1 font-mono text-[12px] text-bone-0 focus:border-bone-4 focus:outline-none"
           />
         </div>
       )}
 
-      {/* Custom-only header name field */}
+      {/* Custom-CVE-only header name field. AI kinds use a fixed
+          auth header (Authorization Bearer / x-api-key) so this
+          field doesn\'t apply to them. */}
       {profile.kind === 'custom' && (
         <div className="mt-2">
           <label className="mb-0.5 block font-mono text-[10px] uppercase tracking-wider text-bone-3">
@@ -262,7 +330,31 @@ function ProfileRow({
         </div>
       )}
 
-      {/* API key — hidden for kinds that don\'t accept one */}
+      {/* AI-kinds-only model field. */}
+      {isAiKind(profile.kind) && (
+        <div className="mt-2">
+          <label className="mb-0.5 block font-mono text-[10px] uppercase tracking-wider text-bone-3">
+            model id
+          </label>
+          <input
+            type="text"
+            value={profile.model ?? ''}
+            onChange={(e) => update({ model: e.target.value })}
+            placeholder={
+              profile.kind === 'anthropic'
+                ? 'claude-sonnet-4-5'
+                : profile.kind === 'openai'
+                  ? 'gpt-4o'
+                  : profile.kind === 'ollama'
+                    ? 'whiterabbitneo'
+                    : 'model-id'
+            }
+            className="w-full rounded-md border border-ink-5 bg-ink-0 inset-input px-2 py-1 font-mono text-[12px] text-bone-0 focus:border-bone-4 focus:outline-none"
+          />
+        </div>
+      )}
+
+      {/* API key — hidden for kinds that don\'t accept one. */}
       {kindNeedsKey(profile.kind) && (
         <div className="mt-2">
           <label className="mb-0.5 block font-mono text-[10px] uppercase tracking-wider text-bone-3">
@@ -280,30 +372,41 @@ function ProfileRow({
         </div>
       )}
 
-      {/* CORS warning when relevant */}
-      {!kindSupportsBrowserCors(profile.kind) && profile.kind !== 'custom' && (
+      {/* AI-kinds-only content-policy note — surface honestly so
+          users aren\'t surprised when a pentest prompt gets refused. */}
+      {isAiKind(profile.kind) && kindPolicyNote(profile.kind) && (
         <div className="mt-2 rounded-md border border-bone-4/30 bg-ink-0/40 p-2 font-mono text-[10.5px] leading-relaxed text-bone-3">
-          ⚠ {kindLabel(profile.kind)} typically blocks browser CORS.
-          If the test below fails with a CORS error, point a{' '}
-          <span className="text-bone-1">custom</span> profile at your
-          own proxy / Cloudflare Worker that forwards to the API.
+          ⓘ {kindPolicyNote(profile.kind)}
         </div>
       )}
 
-      {/* Test row */}
-      <div className="mt-3 flex items-center gap-3">
-        <button
-          type="button"
-          onClick={runTest}
-          disabled={testing}
-          className="rounded-md border border-ink-5 chip px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider text-bone-1 hover:text-bone-0 disabled:opacity-50"
-        >
-          {testing ? 'testing…' : 'test (CVE-2014-0160)'}
-        </button>
-        {testResult && (
-          <TestResultBadge result={testResult} />
-        )}
-      </div>
+      {/* CORS warning for kinds known to block it. */}
+      {!kindSupportsBrowserCors(profile.kind) && profile.kind !== 'custom' && profile.kind !== 'openai-compatible' && (
+        <div className="mt-2 rounded-md border border-bone-4/30 bg-ink-0/40 p-2 font-mono text-[10.5px] leading-relaxed text-bone-3">
+          ⚠ {kindLabel(profile.kind)} typically blocks browser CORS.
+          Point a{' '}
+          <span className="text-bone-1">custom</span> /{' '}
+          <span className="text-bone-1">openai-compatible</span> profile
+          at your own proxy if the test below fails with a CORS error.
+        </div>
+      )}
+
+      {/* Test row — only for CVE kinds (where we have a known
+          test CVE to look up). AI kinds skip the test button;
+          users exercise them via the actual generate flow. */}
+      {!isAiKind(profile.kind) && (
+        <div className="mt-3 flex items-center gap-3">
+          <button
+            type="button"
+            onClick={runTest}
+            disabled={testing}
+            className="rounded-md border border-ink-5 chip px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider text-bone-1 hover:text-bone-0 disabled:opacity-50"
+          >
+            {testing ? 'testing…' : 'test (CVE-2014-0160)'}
+          </button>
+          {testResult && <TestResultBadge result={testResult} />}
+        </div>
+      )}
     </div>
   );
 }
@@ -336,12 +439,17 @@ function TestResultBadge({ result }: { result: FetchResult<CveDetails> }) {
 
 /* =================================================== add row */
 
-function AddRow({ onAdd }: { onAdd: (kind: ByokKind) => void }) {
-  const kinds: ByokKind[] = ['nvd-2.0', 'epss', 'osv', 'vulncheck', 'custom'];
+function AddRow({
+  kinds,
+  onAdd,
+}: {
+  kinds: ByokKind[];
+  onAdd: (kind: ByokKind) => void;
+}) {
   return (
-    <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-ink-5 pt-4">
+    <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-ink-5/60 pt-3">
       <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-bone-3">
-        add profile
+        add
       </span>
       {kinds.map((k) => (
         <button

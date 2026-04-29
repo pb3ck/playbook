@@ -131,6 +131,7 @@ function ShareButton({ state }: { state: PlaybookState }) {
       progress: state.progress,
       visitedSteps: state.visitedSteps,
       infraMap: state.infraMap,
+      aiGenerations: state.aiGenerations,
     });
     const encoded = encodeSnapshotForUrl(snapshot);
     /* Use a fresh URL based on the current origin + pathname so
@@ -208,6 +209,7 @@ function SessionExportButton({ state }: { state: PlaybookState }) {
       progress: state.progress,
       visitedSteps: state.visitedSteps,
       infraMap: state.infraMap,
+      aiGenerations: state.aiGenerations,
     });
     const blob = new Blob([JSON.stringify(snapshot, null, 2)], {
       type: 'application/json;charset=utf-8',
