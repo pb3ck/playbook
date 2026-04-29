@@ -25,11 +25,14 @@
 
 name: autofill
 
+# Repo abandoned 2026-04-29 — successor is pb3ck/quarry. The
+# weekly cron is disabled so this doesn't keep generating PRs
+# nobody will review. workflow_dispatch is preserved so anyone
+# forking the repo can still trigger the loop manually after
+# adding their own ANTHROPIC_API_KEY secret.
 on:
-  schedule:
-    # Mondays at 12:00 UTC. One PR/week is plenty of catalog
-    # growth without overwhelming the maintainer's review queue.
-    - cron: '0 12 * * 1'
+  # schedule:
+  #   - cron: '0 12 * * 1'   # Mondays 12:00 UTC — disabled
   workflow_dispatch:
     inputs:
       tag:
