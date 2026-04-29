@@ -32,6 +32,3 @@ next-env.d.ts
 
 # AI authoring drafts (architecture B) — review before committing
 scripts/drafts/
-
-# coverage reports (committed selectively, not auto)
-coverage/
