@@ -188,12 +188,28 @@ Begin your JSON output now.`;
 
 /** Common shape for raw model calls. Each adapter normalizes
  *  whatever its provider returns into this shape so the
- *  orchestrator can parse uniformly. */
+ *  orchestrator can parse uniformly. `truncated` flag tells the
+ *  parser to surface a clearer error when JSON is incomplete
+ *  (output token limit hit mid-emission rather than a real
+ *  parse bug). */
 type ModelResponse = {
   text: string;
   inputTokens?: number;
   outputTokens?: number;
+  /** True when the provider says the response was cut off due to
+   *  hitting max_tokens. Anthropic: stop_reason==='max_tokens';
+   *  OpenAI: finish_reason==='length'; Ollama: done_reason!=='stop'. */
+  truncated?: boolean;
 };
+
+/** Output token cap. Bumped from the original 4096 after a
+ *  user hit "Unterminated string in JSON" on a mega-prompt that
+ *  asked for content across 3 phases × 4 tags — JSON is verbose
+ *  and 4096 wasn\'t enough headroom. 8192 is the universal max
+ *  for current Sonnet / GPT-4o, plenty for any single-prompt
+ *  generation we expect. Ollama: model-dependent but most
+ *  modern weights handle 8192 fine. */
+const MAX_OUTPUT_TOKENS = 8192;
 
 async function callAnthropic(
   profile: ByokProfile,
@@ -214,7 +230,7 @@ async function callAnthropic(
     },
     body: JSON.stringify({
       model,
-      max_tokens: 4096,
+      max_tokens: MAX_OUTPUT_TOKENS,
       messages: [{ role: 'user', content: systemPrompt }],
     }),
   });
@@ -222,6 +238,7 @@ async function callAnthropic(
     throw new Error(`Anthropic ${res.status}: ${(await res.text()).slice(0, 200)}`);
   }
   const json = (await res.json()) as {
+    stop_reason?: string;
     content: { type: string; text?: string }[];
     usage?: { input_tokens: number; output_tokens: number };
   };
@@ -233,6 +250,7 @@ async function callAnthropic(
     text,
     inputTokens: json.usage?.input_tokens,
     outputTokens: json.usage?.output_tokens,
+    truncated: json.stop_reason === 'max_tokens',
   };
 }
 
@@ -252,7 +270,7 @@ async function callOpenai(
     body: JSON.stringify({
       model,
       messages: [{ role: 'user', content: systemPrompt }],
-      max_tokens: 4096,
+      max_tokens: MAX_OUTPUT_TOKENS,
       /* Force JSON output mode where supported (OpenAI + most
          openai-compatible servers honor this). Falls back to
          best-effort parsing if the server ignores it. */
@@ -263,13 +281,14 @@ async function callOpenai(
     throw new Error(`OpenAI ${res.status}: ${(await res.text()).slice(0, 200)}`);
   }
   const json = (await res.json()) as {
-    choices: { message: { content: string } }[];
+    choices: { message: { content: string }; finish_reason?: string }[];
     usage?: { prompt_tokens: number; completion_tokens: number };
   };
   return {
     text: json.choices[0]?.message?.content ?? '',
     inputTokens: json.usage?.prompt_tokens,
     outputTokens: json.usage?.completion_tokens,
+    truncated: json.choices[0]?.finish_reason === 'length',
   };
 }
 
@@ -287,7 +306,7 @@ async function callOllama(
       prompt: systemPrompt,
       stream: false,
       format: 'json' /* Ollama supports JSON-mode output. */,
-      options: { num_predict: 4096 },
+      options: { num_predict: MAX_OUTPUT_TOKENS },
     }),
   });
   if (!res.ok) {
@@ -297,11 +316,16 @@ async function callOllama(
     response: string;
     prompt_eval_count?: number;
     eval_count?: number;
+    done_reason?: string;
   };
   return {
     text: json.response,
     inputTokens: json.prompt_eval_count,
     outputTokens: json.eval_count,
+    /* Ollama emits done_reason: "length" when num_predict was hit
+       before the model stopped naturally. Other reasons (stop, eof,
+       limit) all indicate non-truncated output. */
+    truncated: json.done_reason === 'length',
   };
 }
 
@@ -399,11 +423,19 @@ export async function generateAssistance(
   try {
     parsed = JSON.parse(cleaned);
   } catch (err) {
+    /* Truncation case — provider said the response hit max_tokens
+       AND we got partial JSON. Give the user actionable advice
+       (split the prompt) instead of the raw "Unterminated string"
+       parser error which doesn\'t hint at the cause. */
+    const baseMsg = err instanceof Error ? err.message : String(err);
+    const truncationHint = response.truncated
+      ? `Model output was truncated at ${response.outputTokens ?? '?'} tokens (provider's max_tokens cap). Try splitting the prompt into smaller pieces (e.g. one per phase) — each generation gets its own token budget.`
+      : `The model returned partial JSON. Try regenerating; if it persists, the prompt may be asking for too much in one shot.`;
     return {
       ...baseProvenance,
       result: { title: '', summary: '', commands: [] },
       ok: false,
-      rawError: `Failed to parse model output as JSON: ${err instanceof Error ? err.message : err}. First 200 chars: ${cleaned.slice(0, 200)}`,
+      rawError: `${truncationHint}\n\nParser error: ${baseMsg}\nFirst 200 chars: ${cleaned.slice(0, 200)}`,
       elapsedMs: Date.now() - t0,
       inputTokens: response.inputTokens,
       outputTokens: response.outputTokens,
