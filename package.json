@@ -2,6 +2,12 @@
   "name": "playbook",
   "version": "0.1.0-alpha",
   "private": true,
+  "license": "MIT",
+  "author": "Paul Beck (pb3ck)",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pb3ck/playbook.git"
+  },
   "description": "A phase-driven walkthrough of offensive security — engagement-aware, ATT&CK-mapped, with an auto-derived attack graph and BYOK CVE enrichment.",
   "scripts": {
     "dev": "next dev",

@@ -125,4 +125,5 @@ tech tag" checklist.
 
 ## License
 
-TBD.
+MIT — see [`LICENSE`](./LICENSE). Use it commercially, fork it,
+embed it; just keep the copyright notice.
