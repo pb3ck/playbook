@@ -41,8 +41,21 @@ export const DEMO_SESSION: SessionSnapshot = {
        refactor. Empty array kept for schema_version=1 back-compat. */
     steps: [],
     commands: [
-      /* Recon: nmap quiet, fingerprint generics + AD enum stack. */
+      /* Recon — narrative arc:
+         (1) Generic nmap sweep finds open ports + service banners.
+         (2) AD-targeted nmap recipe fingerprints kerberos / ldap /
+             mssql / iis specifically. This is the command tagged
+             for those four stacks, so the Map\'s discovererForTag
+             picks Nmap as the parent of each service node ("Nmap
+             discovered these services"). Without this tick the
+             services would all hang off the host with no
+             attribution, which doesn\'t match how a real engagement
+             actually flows.
+         (3) Per-service deep-recon — IIS probes, LDAP/SMB null
+             sessions, Kerberos SRV, AS-REP roast surface — what
+             each "discovered" service actually exposes. */
       'recon:cmd:2:0',
+      'recon:cmd:2:3',
       'recon:cmd:6:0',
       'recon:cmd:6:1',
       'recon:cmd:6:8',
@@ -50,12 +63,20 @@ export const DEMO_SESSION: SessionSnapshot = {
       'recon:cmd:6:23',
       'recon:cmd:6:24',
       'recon:cmd:6:25',
-      /* Vuln: Zerologon + NoPac + Certifried CVE lookups. */
+      /* Vuln — named CVE lookups via cvemap. Each command is
+         tagged for the relevant service (kerberos / ldap), so
+         findings hang off cvemap-as-finding-tool, which sits
+         under the service Nmap discovered. The full chain reads:
+           host -> Nmap -> kerberos -> cvemap -> Zerologon
+           host -> Nmap -> kerberos -> cvemap -> NoPac
+           host -> Nmap -> kerberos+ldap -> cvemap -> Certifried */
       'vuln:cmd:0:9',
       'vuln:cmd:0:11',
       'vuln:cmd:0:12',
-      /* Post-ex: BloodHound + certipy + GetUserSPNs + DCSync chain
-         leading to Golden-Ticket-adjacent capability. */
+      /* Post-ex — BloodHound enum, kerberoast (GetUserSPNs),
+         DCSync, certipy (ESC1 abuse leveraging Certifried above),
+         and a final pass-the-hash to demonstrate lateral movement.
+         Tools attach to the kerberos / ldap services in the Map. */
       'post-ex:cmd:2:0',
       'post-ex:cmd:2:2',
       'post-ex:cmd:2:3',

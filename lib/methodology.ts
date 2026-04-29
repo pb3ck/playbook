@@ -285,6 +285,22 @@ export const PHASES: Phase[] = [
             command: 'mkdir -p engagements/{target}/recon && naabu -host {target} -p - -rate 1000 -o engagements/{target}/recon/naabu.txt',
             mitreTechniques: ['T1595.001'],
           },
+          /* AD-targeted nmap recipe — sweeps the canonical AD
+             service ports + runs NSE scripts that fingerprint
+             each. This is the command that "discovers" the
+             kerberos / ldap / mssql / iis services in an internal
+             Windows engagement; tagging it for those four stacks
+             lets the Map\'s discovererForTag pick Nmap as the
+             parent of each service node, which is the realistic
+             narrative ("Nmap found these services"). */
+          {
+            label: 'nmap — Active Directory service sweep',
+            command: 'mkdir -p engagements/{target}/recon && nmap -p 53,80,88,135,139,389,443,445,464,593,636,1433,3268,3269,3389,5985 -sV -sC --script "smb-os-discovery,krb5-enum-users,ldap-rootdse,ms-sql-info,http-server-header" {target} -oN engagements/{target}/recon/nmap-ad.txt',
+            appliesTo: ['private', 'lab'],
+            osApplies: ['windows'],
+            techApplies: ['kerberos', 'ldap', 'mssql', 'iis'],
+            mitreTechniques: ['T1595.002', 'T1046'],
+          },
         ],
         branches: [
           { if: 'versioned services discovered', goto: 'vuln' },
