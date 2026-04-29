@@ -108,6 +108,7 @@ export function AiAssist({ state }: { state: PlaybookState }) {
               key={g.id}
               generation={g}
               onRemove={() => state.removeAiGeneration(g.id)}
+              onToggleRan={(idx) => state.toggleRanGenerated(g.id, idx)}
               scratchValues={state.scratchValues}
               target={state.target}
               versions={state.versions}
@@ -253,12 +254,14 @@ function PromptForm({
 function GenerationCard({
   generation,
   onRemove,
+  onToggleRan,
   scratchValues,
   target,
   versions,
 }: {
   generation: GeneratedAssistance;
   onRemove: () => void;
+  onToggleRan: (commandIndex: number) => void;
   scratchValues: Record<string, string>;
   target: string;
   versions: Record<string, string>;
@@ -333,6 +336,8 @@ function GenerationCard({
                 <GeneratedCommandRow
                   key={i}
                   command={cmd}
+                  ran={(generation.ranIndices ?? []).includes(i)}
+                  onToggleRan={() => onToggleRan(i)}
                   scratchValues={scratchValues}
                   target={target}
                   versions={versions}
@@ -362,11 +367,15 @@ function GenerationCard({
 
 function GeneratedCommandRow({
   command,
+  ran,
+  onToggleRan,
   scratchValues,
   target,
   versions,
 }: {
   command: GeneratedCommand;
+  ran: boolean;
+  onToggleRan: () => void;
   scratchValues: Record<string, string>;
   target: string;
   versions: Record<string, string>;
@@ -400,9 +409,47 @@ function GeneratedCommandRow({
       {/* Disclosure layer 2: every command gets a (generated) badge
           inline with its label. The badge is mandatory — never
           omitted even when the command looks indistinguishable from
-          curated content. */}
+          curated content. The "ran" checkbox here is the gate that
+          determines whether this generated command flows into the
+          Map\'s auto-derived attack graph. */}
       <div className="flex items-center justify-between gap-2 border-b border-ink-5 bg-ink-2/40 px-3 py-1">
-        <div className="flex min-w-0 items-center gap-2">
+        <button
+          type="button"
+          onClick={onToggleRan}
+          aria-pressed={ran}
+          title={
+            ran
+              ? 'Marked as run — flows into the Map. Click to un-mark.'
+              : 'Click after you run this command — it then appears on the Map (amber-tinted to mark provenance).'
+          }
+          className="group flex min-w-0 flex-1 items-center gap-2 text-left"
+        >
+          <span
+            aria-hidden
+            style={{
+              borderColor: ran
+                ? 'var(--color-warn)'
+                : 'var(--color-bone-4)',
+              background: ran ? 'var(--color-warn)' : 'transparent',
+              borderStyle: ran ? 'solid' : 'dashed',
+            }}
+            className="inline-flex h-3 w-3 shrink-0 items-center justify-center rounded-sm border"
+          >
+            {ran && (
+              <svg
+                width="8"
+                height="8"
+                viewBox="0 0 10 10"
+                fill="none"
+                stroke="var(--color-ink-0)"
+                strokeWidth="2.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M2 5.5L4 7.5L8 3" />
+              </svg>
+            )}
+          </span>
           <span className="rounded border border-warn/40 bg-warn/[0.08] px-1 font-mono text-[9px] uppercase tracking-wider text-warn">
             generated
           </span>
@@ -411,7 +458,7 @@ function GeneratedCommandRow({
               {command.label}
             </span>
           )}
-        </div>
+        </button>
         {command.mitreTechniques && command.mitreTechniques.length > 0 && (
           <div className="flex shrink-0 flex-wrap gap-1">
             {command.mitreTechniques.slice(0, 3).map((t) => {

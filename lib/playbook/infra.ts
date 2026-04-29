@@ -24,6 +24,7 @@ import {
   PHASES,
   commandItemId,
   type CommandSnippet,
+  type ToolRef,
 } from '@/lib/methodology';
 import { isOSVisible } from '@/lib/target-os';
 import {
@@ -32,6 +33,10 @@ import {
   techTagLabel,
   type TechTag,
 } from '@/lib/tech-tags';
+import type {
+  GeneratedAssistance,
+  GeneratedCommand,
+} from './ai-generate';
 
 /** Discriminated union over node types.
  *
@@ -90,6 +95,12 @@ export type InfraNode = {
   /** Optional URL — tool nodes carry this so the canvas can
    *  open the tool\'s docs/repo when clicked. */
   url?: string;
+  /** True when this node was derived from an AI-generated
+   *  command (one the user marked "ran" on the AI Assist
+   *  surface) rather than a catalog-curated command. The map
+   *  applies amber-tinted treatment to generated nodes + edges
+   *  so the user sees provenance at a glance. */
+  generated?: boolean;
 };
 
 /** Persisted shape — only position overrides. The node list itself
@@ -155,6 +166,11 @@ export type DeriveInput = {
    *  derivation; step-level completion isn\'t consulted (it\'s a
    *  workflow signal, not an attribution claim). */
   progress: Set<string>;
+  /** Optional — on-demand AI generations from the user\'s
+   *  session. Only commands the user marked "ran" (ranIndices)
+   *  flow into the derived graph; generated-derived nodes get
+   *  the `generated: true` flag for amber-tinted rendering. */
+  aiGenerations?: GeneratedAssistance[];
 };
 
 /* Layout constants — column x-positions + per-row vertical
@@ -252,8 +268,36 @@ export function deriveNodes(input: DeriveInput): InfraNode[] {
      parentId=host; the rest keep their service-by-tag attachment.
      Findings parent to the tool that surfaced them when the
      command names a step tool, else fall back to service / host. */
-  const rawTools = collectTools(input, reconToolIds);
-  const rawFindings = collectFindings(input);
+  const rawCatalogTools = collectTools(input, reconToolIds);
+  const rawCatalogFindings = collectFindings(input);
+
+  /* Generated additions — only ticked-ran AI commands flow through.
+     Tools/findings that already exist via the catalog walk are
+     skipped so we don\'t produce duplicate ids. Generated nodes
+     get the `generated: true` flag for the canvas\'s amber-tinted
+     rendering. */
+  const catalogToolInventory = collectAllCatalogTools();
+  const catalogToolIdSet = new Set(rawCatalogTools.map((t) => t.id));
+  const rawGenTools = collectToolsFromGenerations(
+    input,
+    catalogToolInventory,
+    reconToolIds,
+    catalogToolIdSet,
+  );
+  /* Findings need the union of catalog + generated tool IDs so a
+     generated finding can hang off a generated tool. */
+  const allToolIdSet = new Set([
+    ...catalogToolIdSet,
+    ...rawGenTools.map((t) => t.id),
+  ]);
+  const rawGenFindings = collectFindingsFromGenerations(
+    input,
+    catalogToolInventory,
+    allToolIdSet,
+  );
+
+  const rawTools = [...rawCatalogTools, ...rawGenTools];
+  const rawFindings = [...rawCatalogFindings, ...rawGenFindings];
   const toolsByParent = groupBy(rawTools, (t) => t.parentId);
   const findingsByParent = groupBy(rawFindings, (f) => f.parentId);
   const toolById = new Map(rawTools.map((t) => [t.id, t] as const));
@@ -294,6 +338,7 @@ export function deriveNodes(input: DeriveInput): InfraNode[] {
           techniques: [],
           url: reconTool.url,
           phase: reconTool.phase,
+          generated: reconTool.generated,
         });
       }
     }
@@ -341,6 +386,7 @@ export function deriveNodes(input: DeriveInput): InfraNode[] {
           techniques: [],
           url: tool.url,
           phase: tool.phase,
+          generated: tool.generated,
         });
         tFindings.forEach((f, i) => {
           out.push({
@@ -353,6 +399,7 @@ export function deriveNodes(input: DeriveInput): InfraNode[] {
             y: segY + i * FINDING_ROW,
             techniques: f.techniques,
             phase: f.phase,
+            generated: f.generated,
           });
         });
         segY += rows * FINDING_ROW;
@@ -373,6 +420,7 @@ export function deriveNodes(input: DeriveInput): InfraNode[] {
           y: segY + i * FINDING_ROW,
           techniques: f.techniques,
           phase: f.phase,
+          generated: f.generated,
         });
       });
 
@@ -408,6 +456,7 @@ export function deriveNodes(input: DeriveInput): InfraNode[] {
         techniques: [],
         url: tool.url,
         phase: tool.phase,
+        generated: tool.generated,
       });
       tFindings.forEach((f, i) => {
         out.push({
@@ -420,6 +469,7 @@ export function deriveNodes(input: DeriveInput): InfraNode[] {
           y: segY + i * FINDING_ROW,
           techniques: f.techniques,
           phase: f.phase,
+          generated: f.generated,
         });
       });
       segY += rows * FINDING_ROW;
@@ -440,6 +490,7 @@ export function deriveNodes(input: DeriveInput): InfraNode[] {
         y: yCursor + i * FINDING_ROW,
         techniques: f.techniques,
         phase: f.phase,
+        generated: f.generated,
       });
     });
     yCursor +=
@@ -546,8 +597,12 @@ type DerivedFinding = {
   techniques: string[];
   /** Phase slug the finding was discovered in (recon / vuln /
    *  exploit / post-ex / defense). Renders as a small chip on
-   *  the finding node so the user can trace it back. */
+   *  the finding node so the user can trace it back. AI-generated
+   *  findings have no phase chip — the `generated` flag carries
+   *  the provenance signal instead. */
   phase: string;
+  /** True for AI-generated derivations. Propagates to InfraNode. */
+  generated?: boolean;
 };
 
 type DerivedTool = {
@@ -557,6 +612,8 @@ type DerivedTool = {
   meta?: string;
   url: string;
   phase: string;
+  /** True for AI-generated derivations. Propagates to InfraNode. */
+  generated?: boolean;
 };
 
 function serviceIdFor(tag: string): string {
@@ -708,6 +765,157 @@ function collectTools(
   return [...seen.values()];
 }
 
+/** Flatten every tool entry across the catalog into a single array.
+ *  AI-generated commands don\'t live inside any specific step, so we
+ *  match their text against the *whole* tool inventory rather than
+ *  the per-step lists used for catalog commands. Deduped by URL. */
+function collectAllCatalogTools(): ToolRef[] {
+  const seen = new Map<string, ToolRef>();
+  for (const phase of PHASES) {
+    for (const step of phase.steps) {
+      for (const tool of step.tools ?? []) {
+        if (!seen.has(tool.url)) seen.set(tool.url, tool);
+      }
+    }
+  }
+  return [...seen.values()];
+}
+
+/** Walk every ticked-ran AI-generated command and emit findings
+ *  derived from CVE-bearing labels. Mirrors collectFindings\'
+ *  parent-picking logic (tool-by-text-match → service-by-tag →
+ *  host) but searches the whole catalog tool inventory rather
+ *  than a single step\'s tools array. Generated findings get
+ *  unique ids prefixed with `find:gen:` so they don\'t collide
+ *  with catalog ids when the layout walk groups by parent. */
+function collectFindingsFromGenerations(
+  input: DeriveInput,
+  catalogTools: ToolRef[],
+  alreadyEmittedToolIds: Set<string>,
+): DerivedFinding[] {
+  const out: DerivedFinding[] = [];
+  for (const gen of input.aiGenerations ?? []) {
+    const ticked = new Set(gen.ranIndices ?? []);
+    for (const i of ticked) {
+      const cmd = gen.result.commands[i];
+      if (!cmd) continue;
+      const finding = generatedCommandToFinding(cmd);
+      if (!finding) continue;
+
+      /* Parent picking — same priority as the catalog finding
+         walker: tool whose name appears in the command, then
+         service-by-tag, then host. Only pick a tool that\'s
+         actually in the live graph (`alreadyEmittedToolIds`)
+         so we don\'t hang findings off a phantom parent. */
+      let parentId: string | null = null;
+      const text = `${cmd.command} ${cmd.label ?? ''}`;
+      for (const tool of catalogTools) {
+        if (!textMentionsTool(text, tool.name)) continue;
+        const candidate = `tool:${tool.url}`;
+        if (alreadyEmittedToolIds.has(candidate)) {
+          parentId = candidate;
+          break;
+        }
+      }
+      if (!parentId) {
+        for (const tag of cmd.techApplies ?? []) {
+          if (input.techTags.includes(tag as TechTag)) {
+            parentId = serviceIdFor(tag);
+            break;
+          }
+        }
+      }
+      if (!parentId) parentId = 'host';
+
+      out.push({
+        id: `find:gen:${gen.id}:${i}`,
+        parentId,
+        label: finding.label,
+        meta: finding.meta,
+        techniques: cmd.mitreTechniques ?? [],
+        /* Empty phase string suppresses the phase chip on the
+           finding node — the `generated` flag carries the
+           provenance signal instead. */
+        phase: '',
+        generated: true,
+      });
+    }
+  }
+  return out;
+}
+
+/** Walk every ticked-ran AI-generated command and emit tool
+ *  nodes for catalog tools the commands invoke. Skips tools
+ *  already covered by the catalog walk so we don\'t produce
+ *  duplicate ids — generated-only tools fill in the gaps. */
+function collectToolsFromGenerations(
+  input: DeriveInput,
+  catalogTools: ToolRef[],
+  reconToolIds: Set<string>,
+  alreadyEmittedToolIds: Set<string>,
+): DerivedTool[] {
+  const seen = new Map<string, DerivedTool>();
+  for (const gen of input.aiGenerations ?? []) {
+    const ticked = new Set(gen.ranIndices ?? []);
+    for (const i of ticked) {
+      const cmd = gen.result.commands[i];
+      if (!cmd) continue;
+      const text = `${cmd.command} ${cmd.label ?? ''}`;
+
+      for (const tool of catalogTools) {
+        const toolId = `tool:${tool.url}`;
+        if (alreadyEmittedToolIds.has(toolId)) continue;
+        if (seen.has(toolId)) continue;
+        if (!textMentionsTool(text, tool.name)) continue;
+
+        /* Same parent rules as catalog tool walker. */
+        let parentId: string;
+        if (reconToolIds.has(toolId)) {
+          parentId = 'host';
+        } else {
+          parentId = 'host';
+          for (const tag of tool.techApplies ?? cmd.techApplies ?? []) {
+            if (input.techTags.includes(tag as TechTag)) {
+              parentId = serviceIdFor(tag);
+              break;
+            }
+          }
+        }
+        seen.set(toolId, {
+          id: toolId,
+          parentId,
+          label: tool.name,
+          meta: tool.kind,
+          url: tool.url,
+          /* Empty phase suppresses the phase chip; generated
+             flag is the provenance signal. */
+          phase: '',
+          generated: true,
+        });
+      }
+    }
+  }
+  return [...seen.values()];
+}
+
+/** Same shape as commandToFinding but for GeneratedCommand —
+ *  GeneratedCommand has `label` only (no separate `command`
+ *  vs `description` distinction we care about), so the
+ *  extraction is simpler. */
+function generatedCommandToFinding(
+  cmd: GeneratedCommand,
+): { label: string; meta?: string } | null {
+  const label = cmd.label ?? '';
+  const cveMatch = label.match(CVE_PATTERN);
+  if (cveMatch) {
+    return {
+      label: extractFindingLabel(label, cveMatch[0]),
+      meta: cveMatch[0],
+    };
+  }
+  return null;
+}
+
 /** Decide whether a command\'s text invokes a particular tool by
  *  checking if the tool\'s name (or any significant word of a
  *  multi-word name) appears as a standalone word in the command\'s
@@ -726,11 +934,13 @@ const TOOL_NAME_STOPWORDS = new Set([
 ]);
 
 function commandMentionsTool(cmd: CommandSnippet, toolName: string): boolean {
-  const haystack = `${cmd.command} ${cmd.label ?? ''}`.toLowerCase();
-  /* Pull out every alphanumeric run from the tool name, drop
-     stopwords, drop too-short runs (< 3 chars). Any remaining
-     word that appears in the haystack with word boundaries
-     counts as a mention. */
+  return textMentionsTool(`${cmd.command} ${cmd.label ?? ''}`, toolName);
+}
+
+/** Underlying word-boundary match. Same logic shared by both the
+ *  catalog\'s commandMentionsTool and the generated-content path. */
+function textMentionsTool(text: string, toolName: string): boolean {
+  const haystack = text.toLowerCase();
   const words = toolName
     .toLowerCase()
     .split(/[^a-z0-9]+/i)

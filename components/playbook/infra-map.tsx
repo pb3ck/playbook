@@ -72,13 +72,25 @@ function serviceAncestor(node: InfraNode, all: InfraNode[]): InfraNode | null {
   return null;
 }
 
-/** Edge stroke color for a given child node. If the child has a
- *  service ancestor (i.e. it sits inside a service\'s sub-tree),
- *  the edge gets that service\'s palette color. Otherwise (host
- *  → recon-tool, host → context, host → credential) it stays the
- *  neutral ink-5 the canvas used before — those "trunk" edges
- *  aren\'t branches and shouldn\'t pretend to be. */
-function edgeStrokeFor(child: InfraNode, all: InfraNode[]): string {
+/** Edge stroke color for a given (child, parent) pair.
+ *
+ *  Provenance overrides taxonomy: if either endpoint is a
+ *  generated node (derived from a ticked-ran AI command), the
+ *  edge gets warn-amber regardless of service ancestry. The
+ *  user-visible signal "this part of the graph came from AI,
+ *  not the catalog" is more important than which service
+ *  branch it belongs to.
+ *
+ *  Otherwise: service-ancestor color for branches; neutral
+ *  ink-5 for trunk edges (host → recon-tool / context / cred). */
+function edgeStrokeFor(
+  child: InfraNode,
+  parent: InfraNode,
+  all: InfraNode[],
+): string {
+  if (child.generated || parent.generated) {
+    return 'var(--color-warn)';
+  }
   const svc = serviceAncestor(child, all);
   return svc ? colorForServiceId(svc.id) : 'var(--color-ink-5)';
 }
@@ -121,6 +133,7 @@ export function InfraMap({ state }: { state: PlaybookState }) {
       versions: state.versions,
       scratchValues: state.scratchValues,
       progress: state.progress,
+      aiGenerations: state.aiGenerations,
     });
     return applyPositions(derived, infraMap.positions);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -132,6 +145,7 @@ export function InfraMap({ state }: { state: PlaybookState }) {
     state.versions,
     state.scratchValues,
     state.progress,
+    state.aiGenerations,
     infraMap.positions,
   ]);
 
@@ -735,7 +749,7 @@ function Canvas({
                 key={`edge-${n.id}`}
                 fromRect={parentRect}
                 toRect={childRect}
-                stroke={edgeStrokeFor(n, nodes)}
+                stroke={edgeStrokeFor(n, parent, nodes)}
               />
             );
           })}
@@ -906,9 +920,14 @@ function CanvasNode({
      edges fanning out from it" without a separate color key
      elsewhere on the canvas. Other node kinds skip the accent
      (their edge color comes from their service ancestor, which
-     is already implicitly attributed to the service node). */
-  const serviceAccent =
-    node.kind === 'service' ? colorForServiceId(node.id) : null;
+     is already implicitly attributed to the service node).
+     Generated nodes override with the warn-amber accent —
+     provenance signal beats taxonomy here. */
+  const serviceAccent = node.generated
+    ? 'var(--color-warn)'
+    : node.kind === 'service'
+      ? colorForServiceId(node.id)
+      : null;
 
   return (
     <motion.div
@@ -922,7 +941,16 @@ function CanvasNode({
         left: node.x + offsetX,
         top: node.y + offsetY,
         touchAction: 'none',
-        ...(serviceAccent
+        ...(node.generated
+          ? {
+              /* Full warn-amber border tint on generated nodes —
+                 unmistakable in a sea of catalog-derived nodes. */
+              borderColor: 'var(--color-warn)',
+              borderWidth: '1px',
+              boxShadow: '0 0 0 1px rgba(255, 178, 36, 0.15)',
+            }
+          : {}),
+        ...(serviceAccent && !node.generated
           ? {
               borderTopColor: serviceAccent,
               borderTopWidth: '2px',
@@ -940,6 +968,14 @@ function CanvasNode({
     >
       <div className="flex items-baseline gap-1.5">
         <NodeKindBadge kind={node.kind} />
+        {node.generated && (
+          <span
+            className="rounded border border-warn/50 bg-warn/[0.08] px-1 font-mono text-[8.5px] uppercase tracking-[0.18em] text-warn"
+            title="Derived from an AI-generated command (ticked-ran in the AI Assist surface). Not curated catalog material."
+          >
+            ai
+          </span>
+        )}
         {node.url ? (
           <a
             href={node.url}
@@ -1163,10 +1199,21 @@ function colorForServiceIdHex(id: string): string {
   return SERVICE_COLORS_HEX[Math.abs(h) % SERVICE_COLORS_HEX.length];
 }
 
-function edgeStrokeForHex(child: InfraNode, all: InfraNode[]): {
+/** Hex equivalent of --color-warn, used for AI-generated edge
+ *  + node treatment in the SVG export. */
+const WARN_HEX = '#ffb224';
+
+function edgeStrokeForHex(
+  child: InfraNode,
+  parent: InfraNode,
+  all: InfraNode[],
+): {
   color: string;
   isStructural: boolean;
 } {
+  if (child.generated || parent.generated) {
+    return { color: WARN_HEX, isStructural: false };
+  }
   const svc = serviceAncestor(child, all);
   return svc
     ? { color: colorForServiceIdHex(svc.id), isStructural: false }
@@ -1209,10 +1256,10 @@ function buildExportSvg(nodes: InfraNode[]): string {
     });
     const cx1 = start.x + (end.x - start.x) * 0.5;
     const cx2 = start.x + (end.x - start.x) * 0.5;
-    /* Per-edge color via service-ancestor lookup — exported SVG
-       preserves the on-screen branch coloring so downloaded
-       reports tell the same engagement story. */
-    const { color, isStructural } = edgeStrokeForHex(n, nodes);
+    /* Per-edge color via service-ancestor lookup, with the same
+       generated-overrides-taxonomy rule as the live canvas:
+       if either endpoint is AI-derived, the edge is amber. */
+    const { color, isStructural } = edgeStrokeForHex(n, parent, nodes);
     const dash = isStructural ? ' stroke-dasharray="3 3"' : '';
     const sw = isStructural ? '1' : '1.25';
     const op = isStructural ? '' : ' stroke-opacity="0.85"';
@@ -1236,6 +1283,11 @@ function buildExportSvg(nodes: InfraNode[]): string {
       } else if (n.kind === 'context') {
         strokeDash = ' stroke-dasharray="4 3"';
       }
+      /* Generated nodes override stroke color — provenance trumps
+         kind. Mirrors the live canvas\'s warn-amber border on
+         AI-derived nodes so downloaded reports preserve the
+         "this came from AI" signal. */
+      if (n.generated) stroke = WARN_HEX;
       const labelText = escapeXml(n.label || `(unnamed ${n.kind})`);
       const metaText = n.meta ? escapeXml(n.meta) : '';
       const techs = n.techniques.slice(0, 4).map(escapeXml).join('  ');
@@ -1245,15 +1297,27 @@ function buildExportSvg(nodes: InfraNode[]): string {
       /* Service nodes get a 2px-tall colored bar across the top
          edge as their palette accent — mirrors the borderTop in
          the live canvas, makes the legend implicit in the export
-         without needing a separate color key. */
-      const accent =
-        n.kind === 'service'
-          ? `<rect x="0" y="0" width="160" height="2" fill="${colorForServiceIdHex(n.id)}" />`
-          : '';
+         without needing a separate color key. Generated nodes use
+         warn-amber for the same accent (overriding the service
+         color since provenance is the dominant signal). */
+      const accentColor = n.generated
+        ? WARN_HEX
+        : n.kind === 'service'
+          ? colorForServiceIdHex(n.id)
+          : null;
+      const accent = accentColor
+        ? `<rect x="0" y="0" width="160" height="2" fill="${accentColor}" />`
+        : '';
+      /* Tiny "AI" glyph in the top-right corner of generated
+         nodes — same role as the AI badge in the live canvas. */
+      const aiGlyph = n.generated
+        ? `<text x="152" y="14" font-family="monospace" font-size="8" fill="${WARN_HEX}" text-anchor="end" letter-spacing="1">AI</text>`
+        : '';
       return `
         <g transform="translate(${x} ${y})">
           <rect width="160" height="${nodeH}" rx="6" ry="6" fill="${fill}" stroke="${stroke}"${strokeDash} />
           ${accent}
+          ${aiGlyph}
           <text x="8" y="14" font-family="monospace" font-size="8" fill="#a3a3a3" letter-spacing="1">${kindLabel(n.kind).toUpperCase()}</text>
           <text x="40" y="14" font-family="monospace" font-size="11" fill="#f5f5f5">${truncateForSvg(labelText, 18)}</text>
           ${metaText ? `<text x="8" y="32" font-family="monospace" font-size="10" fill="#a3a3a3">${truncateForSvg(metaText, 22)}</text>` : ''}

@@ -452,6 +452,26 @@ export function usePlaybookState(): PlaybookState {
     safeWrite(STORAGE_KEYS.aiGenerations, []);
   }, []);
 
+  /** Toggle "I ran this" on a single generated command. Mirrors
+   *  the catalog\'s toggleProgress semantics — only ticked-ran
+   *  commands count toward the auto-derived map. */
+  const toggleRanGenerated = useCallback(
+    (generationId: string, commandIndex: number) => {
+      setAiGenerationsState((prev) => {
+        const next = prev.map((g) => {
+          if (g.id !== generationId) return g;
+          const ranSet = new Set(g.ranIndices ?? []);
+          if (ranSet.has(commandIndex)) ranSet.delete(commandIndex);
+          else ranSet.add(commandIndex);
+          return { ...g, ranIndices: [...ranSet].sort((a, b) => a - b) };
+        });
+        safeWrite(STORAGE_KEYS.aiGenerations, next);
+        return next;
+      });
+    },
+    [],
+  );
+
   return {
     mounted,
     engagement,
@@ -497,5 +517,6 @@ export function usePlaybookState(): PlaybookState {
     addAiGeneration,
     removeAiGeneration,
     clearAiGenerations,
+    toggleRanGenerated,
   };
 }

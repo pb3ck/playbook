@@ -82,6 +82,14 @@ export type GeneratedAssistance = {
   inputTokens?: number;
   outputTokens?: number;
   elapsedMs: number;
+  /** Indices into `result.commands` that the user has marked as
+   *  "I ran this." Drives the Map\'s amber-tinted attribution
+   *  for AI-generated content — only ticked-ran generated commands
+   *  flow into the auto-derived attack graph, mirroring the
+   *  catalog\'s per-command "ran" model. Cleared on regenerate
+   *  (the commands themselves change so historical ticks are
+   *  meaningless). */
+  ranIndices?: number[];
 };
 
 /* =================================================== Prompt builder */
@@ -511,7 +519,20 @@ export function normalizeGenerations(raw: unknown): GeneratedAssistance[] {
     if (!g.result || typeof g.result !== 'object') continue;
     const result = g.result as Record<string, unknown>;
     if (!Array.isArray(result.commands)) continue;
-    out.push(g as unknown as GeneratedAssistance);
+    /* ranIndices is optional + must be a list of finite ints
+       within the commands range. Defensively coerce; an older
+       snapshot without the field stays unticked. */
+    const obj = g as unknown as GeneratedAssistance;
+    if (Array.isArray(obj.ranIndices)) {
+      obj.ranIndices = obj.ranIndices.filter(
+        (i) =>
+          typeof i === 'number' &&
+          Number.isFinite(i) &&
+          i >= 0 &&
+          i < (result.commands as unknown[]).length,
+      );
+    }
+    out.push(obj);
   }
   return trimGenerations(out);
 }

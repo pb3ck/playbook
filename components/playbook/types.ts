@@ -195,4 +195,9 @@ export type PlaybookState = {
   /** Wipe all generations (the welcome modal\'s reset-all-data
    *  link consults this). */
   clearAiGenerations: () => void;
+  /** Toggle the "I ran this" tick on a single generated command.
+   *  Drives whether that command flows into the Map\'s
+   *  auto-derived attack graph (with amber-tinted treatment to
+   *  distinguish from catalog-derived nodes). */
+  toggleRanGenerated: (generationId: string, commandIndex: number) => void;
 };
