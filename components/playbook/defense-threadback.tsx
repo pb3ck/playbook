@@ -2,6 +2,7 @@
 
 import { useMemo } from 'react';
 import { PHASES, commandItemId, type CommandSnippet } from '@/lib/methodology';
+import { lookupTechnique } from '@/lib/mitre';
 import { isOSVisible } from '@/lib/target-os';
 import { isTechVisible, isTechVisibleStrict } from '@/lib/tech-tags';
 import type { PlaybookState } from './types';
@@ -75,29 +76,52 @@ export function DefenseThreadback({ state }: { state: PlaybookState }) {
       </p>
 
       <ul className="space-y-1.5">
-        {techniqueRows.map((row) => (
-          <li
-            key={row.id}
-            className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:gap-3"
-          >
-            <a
-              href={`https://attack.mitre.org/techniques/${row.id.replace('.', '/')}/`}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="shrink-0 font-mono text-[12px] text-bone-1 underline-offset-2 hover:text-bone-0 hover:underline"
-              title="Open MITRE ATT&CK write-up"
+        {techniqueRows.map((row) => {
+          /* Pull name + tactic from the locally-bundled MITRE data
+             (data/mitre-techniques.json, synced from the canonical
+             STIX repo). When the id isn\'t in the bundle — sync
+             hasn\'t been re-run since the catalog added it, or it\'s
+             a typo — we fall back to rendering the bare id. */
+          const meta = lookupTechnique(row.id);
+          return (
+            <li
+              key={row.id}
+              className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:gap-3"
             >
-              {row.id}
-            </a>
-            <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-bone-3">
-              {row.commands
-                .slice(0, 3)
-                .map((c) => c.label ?? '(unlabeled)')
-                .join(' · ')}
-              {row.commands.length > 3 ? ` (+${row.commands.length - 3} more)` : ''}
-            </span>
-          </li>
-        ))}
+              <a
+                href={
+                  meta?.url ??
+                  `https://attack.mitre.org/techniques/${row.id.replace('.', '/')}/`
+                }
+                target="_blank"
+                rel="noreferrer noopener"
+                className="shrink-0 font-mono text-[12px] text-bone-1 underline-offset-2 hover:text-bone-0 hover:underline"
+                title={
+                  meta
+                    ? `${meta.shortDescription || meta.name} — open MITRE write-up`
+                    : 'Open MITRE ATT&CK write-up'
+                }
+              >
+                {row.id}
+                {meta && (
+                  <span className="text-bone-3"> — {meta.name}</span>
+                )}
+              </a>
+              <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-bone-3">
+                {meta && meta.tactics.length > 0 && (
+                  <span className="mr-2 rounded border border-ink-5 bg-ink-0/60 px-1 text-[9.5px] uppercase tracking-wider text-bone-3">
+                    {meta.tactics[0]}
+                  </span>
+                )}
+                {row.commands
+                  .slice(0, 3)
+                  .map((c) => c.label ?? '(unlabeled)')
+                  .join(' · ')}
+                {row.commands.length > 3 ? ` (+${row.commands.length - 3} more)` : ''}
+              </span>
+            </li>
+          );
+        })}
       </ul>
     </section>
   );
