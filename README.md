@@ -123,6 +123,38 @@ authoring** — coverage is the bottleneck. See
 [`ROADMAP.md`](./ROADMAP.md) Appendix for the "ready for a new
 tech tag" checklist.
 
+### Authoring tools
+
+Two dev-side scripts make catalog work tractable. Neither
+ships with the runtime app; they're maintainer tools.
+
+```bash
+# 1. See where coverage stands
+npm run coverage
+# → writes coverage/<today>.md, prints a summary
+# Re-run after every catalog change to track movement against
+# the ROADMAP M2 exit criteria.
+
+# 2. Draft new commands with AI assistance
+echo "ANTHROPIC_API_KEY=sk-ant-..." > .env.local
+npm run ai:draft -- --tag apache --phase recon --count 5
+# → writes scripts/drafts/apache-recon.yaml
+```
+
+`scripts/ai-draft.ts` calls Claude with a structured prompt
+(schema + tone references from the existing catalog + sourcing
+rule) and emits a YAML of candidate commands for you to
+**validate before merging** into `lib/methodology.ts`. The model
+is asked to cite sources and self-rate confidence; the
+`scripts/drafts/` directory is gitignored so unvalidated output
+doesn't leak into history.
+
+Anthropic's content policy refuses pentest queries without
+[security research enrollment](https://www.anthropic.com/research-enrollment) —
+without it, the API answers but Claude refuses. The script's
+`callProvider` is a single function you can swap to OpenAI,
+OpenRouter, or local Ollama if you don't have enrollment.
+
 ## License
 
 MIT — see [`LICENSE`](./LICENSE). Use it commercially, fork it,

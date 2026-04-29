@@ -15,7 +15,8 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "coverage": "tsx scripts/coverage-report.ts"
+    "coverage": "tsx scripts/coverage-report.ts",
+    "ai:draft": "tsx scripts/ai-draft.ts"
   },
   "dependencies": {
     "clsx": "2.1.1",
@@ -25,6 +26,7 @@
     "react-dom": "19.0.0"
   },
   "devDependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
     "@tailwindcss/postcss": "^4.2.4",
     "@types/node": "22.10.5",
     "@types/react": "19.0.7",
