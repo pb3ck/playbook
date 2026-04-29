@@ -1,0 +1,203 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ink-0:   #000000;
+  --color-ink-1:   #0a0a0a;
+  --color-ink-2:   #111111;
+  --color-ink-3:   #161616;
+  --color-ink-4:   #1f1f1f;
+  --color-ink-5:   #262626;
+  --color-ink-6:   #2e2e2e;
+  --color-bone-0:  #f5f5f5;
+  --color-bone-1:  #d4d4d4;
+  --color-bone-2:  #a3a3a3;
+  --color-bone-3:  #737373;
+  --color-bone-4:  #525252;
+  --color-accent:  #e5484d;
+  /* Warning amber — used by the alpha-notice banner + the
+     persistent `alpha` chip in the shell so the disclaimer reads
+     unmistakably as "caution / under construction" without
+     borrowing the destructive red. Sits in the same intensity
+     band as `--color-accent` so the two read as peers. */
+  --color-warn:    #ffb224;
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+:root {
+  color-scheme: dark;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+}
+
+html {
+  /* Always reserve scrollbar space so opening a body-scroll-locking
+     modal (welcome / palette / shortcuts) doesn't shift centered
+     content sideways when the scrollbar disappears. Supported in all
+     modern evergreen browsers; degrades to "no scrollbar gutter
+     reservation" elsewhere (same as before). */
+  scrollbar-gutter: stable;
+}
+
+html, body {
+  background: var(--color-ink-0);
+  color: var(--color-bone-0);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  padding-bottom: max(var(--safe-bottom), 0px);
+}
+
+::selection {
+  background: var(--color-bone-0);
+  color: var(--color-ink-0);
+}
+
+* {
+  border-color: var(--color-ink-5);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* =============================================================
+   Elevation + gradient tokens.
+
+   Pure-black backgrounds make conventional drop shadows nearly
+   invisible. Depth on this site comes from a 3-layer recipe:
+
+     1. inset top highlight  (1px white, low alpha) — top-edge lift
+     2. inset bottom shadow  (1px black, higher alpha) — sit-down line
+     3. outer drop shadow    (soft, large radius) — push neighbors
+        away
+
+   `.elev-1`/`.elev-2`/`.elev-3` ramp those ingredients in
+   intensity. `.glow-active` is the bone-0 ring used for the
+   currently-focused phase / step / node. `.surface-gradient` /
+   `.surface-gradient-deep` give the top-of-card → bottom fade
+   that reads as "this is a raised plane."
+   ============================================================= */
+
+.elev-1 {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.6),
+    0 1px 2px rgba(0, 0, 0, 0.5),
+    0 4px 12px rgba(0, 0, 0, 0.45);
+}
+
+.elev-2 {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.7),
+    0 2px 4px rgba(0, 0, 0, 0.55),
+    0 10px 24px rgba(0, 0, 0, 0.55);
+}
+
+.elev-3 {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.75),
+    0 4px 8px rgba(0, 0, 0, 0.6),
+    0 24px 56px rgba(0, 0, 0, 0.65);
+}
+
+.glow-active {
+  box-shadow:
+    0 0 0 1px rgba(245, 245, 245, 0.15),
+    0 0 14px rgba(245, 245, 245, 0.1);
+}
+
+/* A subtle bone-1 → bone-0 vertical sheen on filled buttons.
+   Reads as "raised metallic surface" without screaming. */
+.btn-sheen {
+  background-image: linear-gradient(
+    180deg,
+    var(--color-bone-0) 0%,
+    var(--color-bone-1) 100%
+  );
+}
+
+/* Top-down vertical fade — dominant card surface treatment. */
+.surface-gradient {
+  background-image: linear-gradient(
+    180deg,
+    rgba(38, 38, 38, 0.45) 0%,
+    rgba(10, 10, 10, 0.45) 60%,
+    rgba(0, 0, 0, 0.45) 100%
+  );
+}
+
+/* Slightly more pronounced — used on welcome / overlay surfaces. */
+.surface-gradient-deep {
+  background-image: linear-gradient(
+    180deg,
+    rgba(46, 46, 46, 0.6) 0%,
+    rgba(14, 14, 14, 0.6) 50%,
+    rgba(0, 0, 0, 0.6) 100%
+  );
+}
+
+/* Inset bevel for input fields — reads as "depressed" so the
+   field looks like a hole punched into the surface, not a tile
+   sitting on it. */
+.inset-input {
+  box-shadow:
+    inset 0 1px 2px rgba(0, 0, 0, 0.55),
+    inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+
+/* Raised pill — gradient bg + tiny top highlight + tiny drop.
+   Used by the shell chips, the export segmented control, and
+   anywhere a small clickable affordance should read as "lifted
+   surface" rather than "flat outlined region." */
+.chip {
+  background-image: linear-gradient(
+    180deg,
+    rgba(46, 46, 46, 0.75) 0%,
+    rgba(17, 17, 17, 0.75) 100%
+  );
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 1px 2px rgba(0, 0, 0, 0.45);
+}
+
+/* A 1px line that fades transparent → ink-5 → transparent edge to edge. */
+.hairline {
+  height: 1px;
+  background-image: linear-gradient(
+    to right,
+    transparent 0%,
+    var(--color-ink-5) 18%,
+    var(--color-ink-5) 82%,
+    transparent 100%
+  );
+}
+
+/* Underline-draw used by inline links. */
+.link-underline {
+  background-image: linear-gradient(currentColor, currentColor);
+  background-position: 0 100%;
+  background-repeat: no-repeat;
+  background-size: 0% 1px;
+  transition: background-size 380ms var(--ease-out-expo);
+}
+.link-underline:hover, .link-underline:focus-visible {
+  background-size: 100% 1px;
+}
+
