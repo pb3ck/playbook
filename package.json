@@ -19,7 +19,8 @@
     "ai:draft": "tsx scripts/ai-draft.ts",
     "ai:apply": "tsx scripts/ai-apply.ts",
     "validate": "tsx scripts/validate.ts",
-    "sync:mitre": "tsx scripts/sync-mitre.ts"
+    "sync:mitre": "tsx scripts/sync-mitre.ts",
+    "check:sources": "tsx scripts/check-sources.ts"
   },
   "dependencies": {
     "clsx": "2.1.1",

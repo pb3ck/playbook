@@ -125,35 +125,62 @@ tech tag" checklist.
 
 ### Authoring tools
 
-Two dev-side scripts make catalog work tractable. Neither
-ships with the runtime app; they're maintainer tools.
+Five dev-side scripts make catalog work tractable. None ship
+with the runtime app; they're maintainer tools.
 
 ```bash
-# 1. See where coverage stands
+# 1. See where coverage stands.
 npm run coverage
 # → writes coverage/<today>.md, prints a summary
 # Re-run after every catalog change to track movement against
 # the ROADMAP M2 exit criteria.
 
-# 2. Draft new commands with AI assistance
+# 2. Draft new commands with AI assistance.
 echo "ANTHROPIC_API_KEY=sk-ant-..." > .env.local
 npm run ai:draft -- --tag apache --phase recon --count 5
 # → writes scripts/drafts/apache-recon.yaml
+
+# 3. Auto-merge drafts into methodology.ts.
+npm run ai:apply -- scripts/drafts/apache-recon.yaml
+# → AI picks the right step for each candidate
+# → patches lib/methodology.ts via bracket-counting source surgery
+# → runs typecheck; reverts on failure
+# → prints reasoning + recommended tool additions
+# Then: review with `git diff` and commit when happy.
+
+# 4. (Manual review path, alternative to ai:apply)
+npm run validate -- scripts/drafts/apache-recon.yaml
+# → interactive (k)eep / (s)kip / (q)uit triage
+# → emits TS snippets for you to paste manually
+
+# 5. Pull the local MITRE ATT&CK bundle.
+npm run sync:mitre
+# → fetches the canonical STIX bundle, extracts only the
+#   technique IDs referenced in lib/methodology.ts
+# → writes data/mitre-techniques.json (~14 KB for 47 techniques)
+# Re-run when you add new mitreTechniques entries to the catalog.
+
+# 6. Audit external tool URLs for link rot.
+npm run check:sources
+# → HEAD-checks every tool URL in the catalog
+# → reports broken (4xx/5xx) + redirected entries
+# → exit code 1 on broken, 0 otherwise (CI-friendly)
 ```
 
-`scripts/ai-draft.ts` calls Claude with a structured prompt
-(schema + tone references from the existing catalog + sourcing
-rule) and emits a YAML of candidate commands for you to
-**validate before merging** into `lib/methodology.ts`. The model
-is asked to cite sources and self-rate confidence; the
-`scripts/drafts/` directory is gitignored so unvalidated output
-doesn't leak into history.
+The `scripts/drafts/` directory is gitignored so unvalidated
+output never leaks into history. `ai:apply` is the preferred path
+for merging — it collapses the per-merge friction (find the right
+step, format the TS, run typecheck) into one command. `validate`
+remains for cases where you want to review each entry interactively
+before placement.
 
-Anthropic's content policy refuses pentest queries without
-[security research enrollment](https://www.anthropic.com/research-enrollment) —
-without it, the API answers but Claude refuses. The script's
-`callProvider` is a single function you can swap to OpenAI,
-OpenRouter, or local Ollama if you don't have enrollment.
+The AI authoring CLI (`ai:draft` and `ai:apply`) calls Anthropic
+by default. Anthropic's content policy refuses pentest queries
+without [security research enrollment](https://www.anthropic.com/research-enrollment).
+Without it, the API answers but Claude refuses. Both scripts
+expose a `--model` flag and the `callProvider` / `callClaude`
+functions are single-place edits if you want to point at OpenAI,
+OpenRouter, or local Ollama.
 
 ## License
 
