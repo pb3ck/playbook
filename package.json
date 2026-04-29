@@ -16,7 +16,8 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "coverage": "tsx scripts/coverage-report.ts",
-    "ai:draft": "tsx scripts/ai-draft.ts"
+    "ai:draft": "tsx scripts/ai-draft.ts",
+    "validate": "tsx scripts/validate.ts"
   },
   "dependencies": {
     "clsx": "2.1.1",
@@ -36,6 +37,7 @@
     "postcss": "8.5.1",
     "tailwindcss": "^4.2.4",
     "tsx": "^4.19.2",
-    "typescript": "5.7.3"
+    "typescript": "5.7.3",
+    "yaml": "^2.6.1"
   }
 }

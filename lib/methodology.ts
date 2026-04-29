@@ -625,6 +625,29 @@ export const PHASES: Phase[] = [
             command: 'mkdir -p engagements/{target}/vuln && searchsploit microsoft iis {version} | tee engagements/{target}/vuln/searchsploit-iis.txt',
             techApplies: ['iis'],
           },
+          /* Active vuln-scan + enrichment. AI-drafted 2026-04-29
+             from scripts/drafts/apache-vuln.yaml; not yet
+             lab-validated (no `validated` field). nuclei is
+             apache-specific via the `-tags apache` flag; EPSS
+             and vulscan are generic web-stack helpers that pair
+             with the cvemap output above (cvemap finds CVE ids,
+             EPSS scores them by exploit probability, vulscan +
+             nuclei actively probe). */
+          {
+            label: 'nuclei — apache CVE templates',
+            command: 'mkdir -p engagements/{target}/vuln && nuclei -u {target} -t cves/ -tags apache -rl 5 -severity critical,high,medium -o engagements/{target}/vuln/nuclei-apache.txt',
+            techApplies: ['apache'],
+            mitreTechniques: ['T1190'],
+          },
+          {
+            label: 'EPSS — score discovered CVEs',
+            command: 'mkdir -p engagements/{target}/vuln && curl -s "https://api.first.org/data/v1/epss?cve=$(grep -ohE \'CVE-[0-9]{4}-[0-9]+\' engagements/{target}/vuln/cves-*.txt 2>/dev/null | sort -u | paste -sd,)" | jq -r \'.data[] | "\\(.cve)\\t\\(.epss)\\t\\(.percentile)"\' | sort -t$\'\\t\' -k2 -rn | tee engagements/{target}/vuln/epss.txt',
+          },
+          {
+            label: 'vulscan — nmap NSE CVE matching',
+            command: 'mkdir -p engagements/{target}/vuln && nmap -sV --script vulscan/vulscan.nse --script-args vulscandb=cve.csv,vulscanoutput=details -p 80,443,8080,8443 {target} -oN engagements/{target}/vuln/vulscan.txt',
+            mitreTechniques: ['T1595.002'],
+          },
           /* AD-protocol CVE family. These don\'t fit the
              "version-of-product" cvemap pattern — they\'re named
              vulnerabilities of the AD/Kerberos protocol stack,
@@ -674,6 +697,14 @@ export const PHASES: Phase[] = [
           { name: 'NVD', url: 'https://nvd.nist.gov/', kind: 'web', note: 'Official CVE database' },
           { name: 'OSV', url: 'https://osv.dev/', kind: 'web', note: 'Cross-ecosystem (npm, PyPI, OS packages, etc.)' },
           { name: 'cvemap', url: 'https://github.com/projectdiscovery/cvemap', kind: 'cli', note: 'CVE search/filter from CLI' },
+          /* Nuclei is the generic template-based scanner; per-tech
+             behavior comes from `-tags <stack>`. Tagged here for
+             the web stacks where ProjectDiscovery ships templates
+             — flips "no tagged tool" for apache / nginx /
+             wordpress / iis simultaneously and gives the map a
+             discoverer-tool node for any of them. */
+          { name: 'nuclei', url: 'https://github.com/projectdiscovery/nuclei', kind: 'cli', note: 'Template-based vuln scanner; -tags <stack> filters templates by tech', techApplies: ['apache', 'nginx', 'wordpress', 'iis'] },
+          { name: 'EPSS', url: 'https://www.first.org/epss/', kind: 'web', note: 'Exploit-probability scores; triage CVE list by likelihood of in-the-wild use' },
           { name: 'ADCS attack reference (SpecterOps)', url: 'https://posts.specterops.io/certified-pre-owned-d95910965cd2', kind: 'web', note: 'The ESC1-ESC8 catalog — required reading for ADCS work', techApplies: ['kerberos', 'ldap'], osApplies: ['windows'] },
         ],
       },
